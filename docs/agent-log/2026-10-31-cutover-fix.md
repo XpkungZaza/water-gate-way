@@ -178,3 +178,5 @@
 - **Why:** the old baseline let a held-back start (26 s measured) become permanent lag, nothing drained lag under the 8 s threshold, and a connection that sent headers then nothing spun forever and held a stream slot for 10 minutes.
 - **Result:** 300 tests, tsc, eslint pass. Not measured on the real cameras yet: catch-up assumes the network can deliver faster than 1x.
 - **Lesson:** 📌 GENERAL: `overflow-x: auto` silently turns `overflow-y` into `auto` as well. 📌 GENERAL: killing an agent CLI client may not stop its session; check `git status` for edits you did not ask for before trusting the tree.
+- **Deploy dead end:** `npm ci --omit=dev` on the droplet was OOM-killed (exit 137; 961 MB RAM, no swap, app + Postgres running) and the chained command had already switched `current` to the half-built release. Switched it back, rebuilt, then hard-linked node_modules from 6573952 (lockfile only drops six unused packages). Smoke test passed; `current` → 20261101-24d37ca, waiting on restart.
+- **Lesson:** never chain `ln -sfn current` after the smoke test with `;` — switch only on success. A 1 GB droplet needs swap before any `npm ci`.
