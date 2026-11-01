@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { isTooFarBehind } from "./liveLag";
+import { catchUpRate, excessLagSeconds, isTooFarBehind } from "./liveLag";
 
 interface Go2RTCPlayerProps {
   streamName: string;
@@ -13,6 +13,14 @@ type Status = "connecting" | "connected" | "failed";
 // WHY: a frozen picture must not stay labelled LIVE. Progressive MP4 gives no error when the
 // camera drops, so playback progress is the only signal.
 const STALL_MS = 8_000;
+// WHY: a request that never reaches `playing` (headers then silence, a hung proxy) used to spin forever.
+const CONNECT_TIMEOUT_MS = 15_000;
+// Automatic retries before showing "failed"; the manual retry button resets the count.
+const MAX_FAILURES = 3;
+const RETRY_DELAY_MS = 2_000;
+// WHY: if every fresh connection starts slow, lag reconnects would loop; one per 30 s at most.
+const LAG_RECONNECT_MIN_MS = 30_000;
+const DEV = process.env.NODE_ENV !== "production";
 
 export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
   const [status, setStatus] = useState<Status>("connecting");
@@ -24,10 +32,25 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
   const requestedAt = useRef(0);
   const startLag = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const failures = useRef(0);
+  const lastLagReconnect = useRef(0);
 
-  const retry = () => {
+  const reconnect = () => {
     setStatus("connecting");
     setAttempt((n) => n + 1);
+  };
+  const retry = () => {
+    failures.current = 0;
+    reconnect();
+  };
+  const fail = () => {
+    failures.current += 1;
+    if (failures.current >= MAX_FAILURES) {
+      setStatus("failed");
+      return;
+    }
+    setStatus("connecting");
+    setTimeout(() => setAttempt((n) => n + 1), RETRY_DELAY_MS);
   };
 
   useEffect(() => {
@@ -40,6 +63,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
       const isHidden = document.visibilityState === "hidden";
       setHidden(isHidden);
       if (!isHidden) {
+        failures.current = 0;
         setStatus("connecting");
         setAttempt((n) => n + 1);
       }
@@ -48,23 +72,37 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, []);
 
+  // Connect timeout: no `playing` within 15 s counts as a failed attempt.
+  useEffect(() => {
+    if (status !== "connecting" || hidden) return;
+    const id = setTimeout(fail, CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [status, hidden, attempt]);
+
   useEffect(() => {
     if (status !== "connected" || hidden) return;
     const id = setInterval(() => {
+      const v = videoRef.current;
       const stalled = Date.now() - lastProgress.current > STALL_MS;
-      // WHY: the HTTP pipe is lossless, so time not played becomes backlog that never drains.
-      // Seeking cannot fix it; only a fresh request can.
-      const behind =
-        videoRef.current !== null &&
-        startLag.current !== null &&
-        isTooFarBehind((performance.now() - requestedAt.current) / 1000, videoRef.current.currentTime, startLag.current);
+      let behind = false;
+      if (v && startLag.current !== null) {
+        const elapsed = (performance.now() - requestedAt.current) / 1000;
+        // WHY: the HTTP pipe is lossless, so time not played becomes backlog that never drains by
+        // itself. Seeking cannot reach it (it sits upstream); playing faster pulls it through.
+        const ahead = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0;
+        v.playbackRate = catchUpRate(excessLagSeconds(elapsed, v.currentTime, startLag.current), ahead, v.playbackRate);
+        behind =
+          isTooFarBehind(elapsed, v.currentTime, startLag.current) &&
+          Date.now() - lastLagReconnect.current > LAG_RECONNECT_MIN_MS;
+        if (behind) lastLagReconnect.current = Date.now();
+      }
       if (stalled || behind) {
-        setStatus("connecting");
-        setAttempt((n) => n + 1);
+        if (DEV) console.debug(`[camera] ${streamName} reconnect: ${stalled ? "stalled" : "behind"}`);
+        reconnect();
       }
     }, 2_000);
     return () => clearInterval(id);
-  }, [status, hidden]);
+  }, [status, hidden, streamName]);
 
   // WHY: go2rtc's fragmented MP4 over HTTP through the authenticated same-origin proxy, so it needs
   // no WebRTC/ICE and works from any network. The server ends each stream after 10 minutes
@@ -87,14 +125,18 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
           className="h-full w-full object-cover"
           onPlaying={(e) => {
             lastProgress.current = Date.now();
-            startLag.current ??= (performance.now() - requestedAt.current) / 1000 - e.currentTarget.currentTime;
+            if (startLag.current === null) {
+              startLag.current = (performance.now() - requestedAt.current) / 1000 - e.currentTarget.currentTime;
+              if (DEV) console.debug(`[camera] ${streamName} start lag ${startLag.current.toFixed(1)} s`);
+            }
+            failures.current = 0;
             setStatus("connected");
           }}
           onTimeUpdate={() => {
             lastProgress.current = Date.now();
           }}
-          onError={() => setStatus("failed")}
-          onEnded={() => setTimeout(retry, 1_000)}
+          onError={fail}
+          onEnded={() => setTimeout(reconnect, 1_000)}
         />
       )}
 

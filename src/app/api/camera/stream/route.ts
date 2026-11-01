@@ -6,6 +6,9 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED: ReadonlySet<string> = new Set(CAMERAS);
 const CONNECT_TIMEOUT_MS = 10_000;
+// WHY: a camera that sends headers and then nothing would otherwise hold a slot (and a spinning player)
+// until MAX_LIFETIME_MS. Only time spent waiting on go2rtc counts, never browser backpressure.
+const IDLE_TIMEOUT_MS = 10_000;
 // WHY: a live stream never ends by itself. Cutting it lets the player reconnect, which re-runs
 // requireUser, so a signed-out or disabled user stops receiving video.
 const MAX_LIFETIME_MS = 10 * 60_000;
@@ -102,12 +105,15 @@ export async function GET(request: Request) {
       controller = c;
     },
     async pull(c) {
+      const idle = setTimeout(() => finish(true), IDLE_TIMEOUT_MS);
       try {
         const { done, value } = await reader.read();
         if (done) finish(true);
-        else c.enqueue(value);
+        else if (!finished) c.enqueue(value);
       } catch {
         finish(true); // upstream dropped; the player reconnects
+      } finally {
+        clearTimeout(idle);
       }
     },
     cancel() {

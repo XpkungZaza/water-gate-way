@@ -196,11 +196,48 @@ describe("GET /api/camera/stream", () => {
     const reader = res.body!.getReader();
     up.push("a");
     expect(text((await reader.read()).value)).toBe("a");
+    // WHY: fill the one-chunk queue so no pull is waiting on go2rtc; otherwise the idle timeout ends it first.
+    up.push("b");
 
     await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
     expect(up.cancel).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    expect(text((await reader.read()).value)).toBe("b"); // queued before the cut, still delivered
     expect((await reader.read()).done).toBe(true);
     expect(up.cancel).toHaveBeenCalled();
+  });
+
+  it("ends the stream when go2rtc sends headers and then nothing for 10 s", async () => {
+    vi.useFakeTimers();
+    const up = liveUpstream();
+    fetchMock.mockResolvedValue(up.res);
+    const res = await GET(req("office1"));
+    const reader = res.body!.getReader();
+    up.push("a");
+    expect(text((await reader.read()).value)).toBe("a");
+
+    const next = reader.read();
+    await vi.advanceTimersByTimeAsync(10_000 - 1);
+    expect(up.cancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await next).done).toBe(true);
+    expect(up.cancel).toHaveBeenCalled();
+  });
+
+  it("a slow browser (backpressure) is not idle: data waiting in the queue never times out", async () => {
+    vi.useFakeTimers();
+    const up = liveUpstream();
+    fetchMock.mockResolvedValue(up.res);
+    const res = await GET(req("office1"));
+    const reader = res.body!.getReader();
+    up.push("a");
+    up.push("b");
+    expect(text((await reader.read()).value)).toBe("a");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(up.cancel).not.toHaveBeenCalled();
+    expect(text((await reader.read()).value)).toBe("b");
+    await res.body!.cancel().catch(() => {});
+    reader.releaseLock();
   });
 });

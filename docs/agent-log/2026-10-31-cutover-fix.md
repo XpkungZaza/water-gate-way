@@ -169,3 +169,12 @@
 - **Result:** 291 tests (13 belonged to removed code), eslint clean; tsc only complained about stale `.next/types` for the removed route, cleared by a clean build.
 - **Not removed (on purpose):** `esp32-s3/Backup/` (its `.ino` has no identical copy), `esp32-s3/ui-mockup (1).html` (differs from `ui-mockup.html`), setup guides. Deleting a file does not remove it from public history: the Postgres password and camera passwords must be rotated.
 - **Lesson:** a `.example` template plus a gitignored real file is the pattern that keeps deploy configs documented without publishing secrets.
+
+## [12:50] Camera Phase 1 (web side) + admin tab scrollbar; runaway opencode session
+
+- **Dead end:** the opencode run for the scrollbar fix left AdminNav untouched and instead rewrote DashboardClient, ControlPanel, DeviceSwitch and page.tsx back toward the pre-polish code (viewer panel and "อุปกรณ์ยืนยันแล้ว" removed). Killed the process, reverted those four files to HEAD with `git checkout --`, and did the fixes by hand.
+- **Action (AdminNav):** `overflow-y-hidden` beside `overflow-x-auto`, `<li>` and `<Link>` block-level flex, no `-mb-px`.
+- **Action (camera, from the Haiku root-cause report):** route: 10 s idle timeout per pull, counting only time waiting on go2rtc (+2 tests). liveLag: start-lag baseline capped at 5 s (was up to 30 s accepted), `catchUpRate` (1.25x while more than 2 s behind with at least 1 s buffered, hysteresis to 0.5 s) (+7 tests). Player: 15 s connect timeout, 3 automatic retries 2 s apart before "failed", lag reconnects at most once per 30 s, dev-only console.debug of start lag and reconnect reason.
+- **Why:** the old baseline let a held-back start (26 s measured) become permanent lag, nothing drained lag under the 8 s threshold, and a connection that sent headers then nothing spun forever and held a stream slot for 10 minutes.
+- **Result:** 300 tests, tsc, eslint pass. Not measured on the real cameras yet: catch-up assumes the network can deliver faster than 1x.
+- **Lesson:** 📌 GENERAL: `overflow-x: auto` silently turns `overflow-y` into `auto` as well. 📌 GENERAL: killing an agent CLI client may not stop its session; check `git status` for edits you did not ask for before trusting the tree.
