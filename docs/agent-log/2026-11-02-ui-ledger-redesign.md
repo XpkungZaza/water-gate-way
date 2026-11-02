@@ -229,3 +229,8 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   build OK. Not verified: Safari / iOS (ManagedMediaSource path), prod path through droplet + Cloudflare.
 - **Lesson:** 📌 GENERAL: a monitoring view must retry forever with backoff; "give up after N" turns a 5-second
   outage into a dead screen until a human clicks.
+- **Deploy 73cbd6c (rate limit 1/s + MSE player):** prod dependency set identical to 5b25df1 (156 packages, same
+  hash), so node_modules hard-linked from 20261102-5b25df1. Clean build (319 tests, tsc, lint 0 errors, audit 0
+  high). Smoke on :3100 passed; MSE code present in the client bundle; droplet → go2rtc frame 200. Leo restarted
+  at 10:56:31 UTC; process cwd releases/20261102-73cbd6c; www.hyxc.io routes as expected; 0 error lines.
+  Not verified: live playback on prod with a real session (needs Leo's account), Safari/iOS.
