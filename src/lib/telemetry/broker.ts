@@ -1,0 +1,146 @@
+import "server-only";
+import { connect, type MqttClient } from "mqtt";
+import { parseStatus, type GateStatus } from "./parseStatus";
+import { recordLevel } from "./recordLevel";
+
+export type ConnState = "connected" | "disconnected";
+export type StatusEvent = { type: "status"; status: GateStatus } | { type: "conn"; state: ConnState };
+type Listener = (e: StatusEvent) => void;
+
+type State = {
+  client: MqttClient | null;
+  conn: ConnState;
+  last: GateStatus | null;
+  listeners: Set<Listener>;
+  lastWarn: number;
+};
+
+const DEFAULT_TOPIC = "stm32/status/all";
+const MAX_PAYLOAD = 64 * 1024;
+const WARN_EVERY_MS = 60_000;
+const PUBLISH_TIMEOUT_MS = 5_000;
+
+// WHY: globalThis survives Next dev hot reloads, so one broker connection per process, not per reload.
+const g = globalThis as typeof globalThis & { __wgTelemetry?: State };
+
+function emit(s: State, e: StatusEvent) {
+  for (const l of s.listeners) {
+    try {
+      l(e);
+    } catch (err) {
+      console.error("[telemetry] listener failed:", err instanceof Error ? err.message : "unknown");
+    }
+  }
+}
+
+function setConn(s: State, conn: ConnState) {
+  if (s.conn === conn) return;
+  s.conn = conn;
+  emit(s, { type: "conn", state: conn });
+}
+
+// WHY: never echo the payload; it is untrusted and may be large.
+function warnBadPayload(s: State, topic: string) {
+  const now = Date.now();
+  if (now - s.lastWarn < WARN_EVERY_MS) return;
+  s.lastWarn = now;
+  console.warn(`[telemetry] dropped unparseable message on ${topic}`);
+}
+
+function start(s: State) {
+  const url = process.env.MQTT_URL;
+  if (!url) {
+    console.error("[telemetry] MQTT_URL is not set; telemetry stream stays disconnected");
+    return;
+  }
+  const client = connect(url, {
+    username: process.env.MQTT_USERNAME || undefined,
+    password: process.env.MQTT_PASSWORD || undefined,
+    reconnectPeriod: 5_000,
+    // WHY: publish() must fail while offline, not queue and deliver a stale pump command after a reconnect.
+    queueQoSZero: false,
+  });
+  s.client = client;
+
+  const extra = process.env.MQTT_TOPIC_STATUS;
+  const topics = extra && extra !== DEFAULT_TOPIC ? [DEFAULT_TOPIC, extra] : [DEFAULT_TOPIC];
+
+  client.on("connect", () => {
+    setConn(s, "connected");
+    // WHY: subscribe on every connect; a clean session after reconnect drops subscriptions.
+    client.subscribe(topics, (err) => {
+      if (err) console.error("[telemetry] subscribe failed:", err.message);
+    });
+  });
+  client.on("offline", () => setConn(s, "disconnected"));
+  client.on("close", () => setConn(s, "disconnected"));
+  client.on("error", (err) => {
+    console.error("[telemetry] mqtt error:", err.message);
+    setConn(s, "disconnected");
+  });
+  client.on("message", (topic, payload) => {
+    let status: GateStatus | null = null;
+    if (payload.length <= MAX_PAYLOAD) {
+      try {
+        status = parseStatus(JSON.parse(payload.toString("utf8")), new Date());
+      } catch {
+        status = null;
+      }
+    }
+    if (!status) return warnBadPayload(s, topic);
+    s.last = status;
+    void recordLevel(status);
+    emit(s, { type: "status", status });
+  });
+}
+
+// WHY: the connection must start at server boot, not on the first visitor, or nothing is recorded while nobody has the dashboard open.
+export function startTelemetry(): void {
+  state();
+}
+
+function state(): State {
+  if (!g.__wgTelemetry) {
+    const s: State = { client: null, conn: "disconnected", last: null, listeners: new Set(), lastWarn: -Infinity };
+    g.__wgTelemetry = s;
+    start(s);
+  }
+  return g.__wgTelemetry;
+}
+
+/**
+ * Publishes through the same connection as the status subscriber. Resolves true once mqtt.js has
+ * written the message to the broker connection; false when the broker is not connected, mqtt.js
+ * reports an error, or nothing happens within 5 s. QoS 0: at most once, never retried or replayed.
+ * Delivery to the subscriber is not confirmed; the status stream shows the effect.
+ */
+export function publish(topic: string, payload: string): Promise<boolean> {
+  const s = state();
+  const client = s.client;
+  if (!client || s.conn !== "connected") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    // shortcut: a callback arriving after the timeout is ignored (promise already settled), so a
+    // slow write may report "failed" for a command that went out; acceptable, commands are idempotent.
+    const timer = setTimeout(() => resolve(false), PUBLISH_TIMEOUT_MS);
+    client.publish(topic, payload, { qos: 0 }, (err) => {
+      clearTimeout(timer);
+      if (err) console.error("[telemetry] publish failed:", err.message);
+      resolve(!err);
+    });
+  });
+}
+
+/** Listener gets the current conn state (and last status, if any) immediately, then live events. */
+export function subscribeStatus(listener: Listener): () => void {
+  const s = state();
+  s.listeners.add(listener);
+  try {
+    listener({ type: "conn", state: s.conn });
+    if (s.last) listener({ type: "status", status: s.last });
+  } catch (err) {
+    console.error("[telemetry] listener failed:", err instanceof Error ? err.message : "unknown");
+  }
+  return () => {
+    s.listeners.delete(listener);
+  };
+}

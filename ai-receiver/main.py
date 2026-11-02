@@ -13,6 +13,7 @@ Deployment:
 """
 
 import asyncio
+import hmac
 import json
 import os
 import re
@@ -24,8 +25,8 @@ from typing import Optional, Set
 
 import paho.mqtt.client as mqtt
 import serial
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 
@@ -43,12 +44,19 @@ SERIAL_BAUD = 9600
 SERIAL_TIMEOUT = 1
 RECONNECT_DELAY = 3.0
 
-MQTT_HOST = os.getenv("MQTT_HOST", "178.128.49.254")
+# WHY: no hardcoded broker host. Missing config fails at import, before any connect.
+MQTT_HOST = os.getenv("MQTT_HOST")
+if not MQTT_HOST:
+    raise SystemExit("[FATAL] Missing required env var MQTT_HOST. See .env.example.")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+# WHY: the broker requires a login after the lockdown. Unset = anonymous (local dev only).
+MQTT_USER = os.getenv("MQTT_USER")
+MQTT_PASS = os.getenv("MQTT_PASS", "")
 TOPIC_CONTROL = os.getenv("MQTT_TOPIC_CONTROL", "water/gate/control")
 TOPIC_STATUS = os.getenv("MQTT_TOPIC_STATUS", "water/gate/status")
 
-API_HOST = "0.0.0.0"
+# WHY: loopback by default; only the Next.js server on this host calls FastAPI.
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = 8000
 WS_PING_INTERVAL = 30.0
 
@@ -62,6 +70,28 @@ VALID_COMMANDS = {
     "Q1", "Q0",  # Relay 2
 }
 CMD_PATTERN = re.compile(r"^[A-Z][01]$")
+
+MIN_SECRET_LEN = 32
+
+
+def require_control_secret() -> str:
+    """Return CONTROL_SHARED_SECRET or exit. Called at startup, not at import,
+    so tests can import this module without a secret."""
+    secret = os.getenv("CONTROL_SHARED_SECRET", "")
+    if len(secret) < MIN_SECRET_LEN:
+        raise SystemExit(
+            f"[FATAL] CONTROL_SHARED_SECRET missing or shorter than {MIN_SECRET_LEN} chars. See .env.example."
+        )
+    return secret
+
+
+def verify_control_token(x_control_token: Optional[str] = Header(default=None)) -> None:
+    # WHY: constant-time compare on bytes (str compare_digest rejects non-ASCII);
+    # same generic 401 for missing and wrong so nothing leaks.
+    expected = os.getenv("CONTROL_SHARED_SECRET", "").encode("utf-8")
+    given = (x_control_token or "").encode("utf-8")
+    if len(expected) < MIN_SECRET_LEN or not hmac.compare_digest(given, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 # ===========================================================================
@@ -158,6 +188,8 @@ def start_mqtt() -> None:
     global mqtt_client
     print(f"[MQTT] Starting -> {MQTT_HOST}:{MQTT_PORT}")
     mqtt_client = mqtt.Client()
+    if MQTT_USER:
+        mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
     mqtt_client.on_connect = on_mqtt_connect
     mqtt_client.on_disconnect = on_mqtt_disconnect
     mqtt_client.on_message = on_mqtt_message
@@ -184,15 +216,16 @@ def mqtt_publish_status(data_dict: dict) -> None:
 # SERIAL COMMAND SENDER
 # ===========================================================================
 
-def send_cmd(cmd: str) -> None:
+def send_cmd(cmd: str) -> bool:
     """
     Transmit a validated command to the STM32 over serial.
     The command MUST already be sanitized before reaching here.
+    Returns True only if the bytes were written to an open port.
     """
     payload = cmd.strip()
     if len(payload) != 2:
         print(f"[SERIAL TX REJECTED] Bad length: {payload!r}")
-        return
+        return False
 
     with state.serial_lock:
         if state.serial_port is not None and state.serial_port.is_open:
@@ -201,10 +234,12 @@ def send_cmd(cmd: str) -> None:
                 state.serial_port.write(payload.encode("utf-8"))
                 state.serial_port.flush()
                 print(f"[SERIAL TX SUCCESS] Sent: {payload!r}")
+                return True
             except Exception as exc:
                 print(f"[SERIAL TX ERROR] {exc}")
-        else:
-            print(f"[SERIAL TX MOCK] {payload!r} (port closed)")
+                return False
+        print(f"[SERIAL TX MOCK] {payload!r} (port closed)")
+        return False
 
 
 # ===========================================================================
@@ -357,6 +392,7 @@ async def _broadcast_to_all(payload: dict) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    require_control_secret()
     state.loop = asyncio.get_running_loop()
     start_mqtt()
     thread = threading.Thread(target=serial_reader_thread, daemon=True)
@@ -382,13 +418,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# WHY: no CORS middleware. Browsers never call FastAPI; only the Next.js server does.
 
 
 # ===========================================================================
@@ -414,33 +444,31 @@ async def mqtt_status():
     }
 
 
-@app.post("/api/control")
+@app.post("/api/control", dependencies=[Depends(verify_control_token)])
 async def control_command(payload: CommandPayload):
     """HTTP fallback — also validates before sending."""
     cmd = sanitize_command(payload.command)
     if not cmd:
         return {"status": "rejected", "reason": "invalid command"}
-    send_cmd(cmd)
-    # Echo to MQTT so other subscribers see it
-    if mqtt_client is not None and state.mqtt_connected:
-        try:
-            mqtt_client.publish(TOPIC_CONTROL, cmd, qos=0)
-        except Exception as exc:
-            print(f"[MQTT Echo ERROR] {exc}")
+    # WHY: no MQTT echo to TOPIC_CONTROL. This process subscribes to that topic,
+    # so an echo re-enters on_mqtt_message and sends the command to serial twice.
+    if not send_cmd(cmd):
+        # WHY: 503 instead of 200 so the caller never treats an unsent command as done
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "reason": "serial port not open", "command": cmd},
+        )
     return {"status": "ok", "command_sent": cmd}
 
 
-@app.post("/api/update-count")
+@app.post("/api/update-count", dependencies=[Depends(verify_control_token)])
 async def update_count(payload: PersonCountPayload):
     state.latest_person_count = payload.count
-    if payload.count > 0:
-        send_cmd("M1")
-    else:
-        send_cmd("M0")
+    serial_sent = send_cmd("M1" if payload.count > 0 else "M0")
     unified = build_unified_payload()
     await _broadcast_to_all(unified)
     mqtt_publish_status(unified)
-    return {"status": "ok", "person_count": payload.count}
+    return {"status": "ok", "person_count": payload.count, "serial_sent": serial_sent}
 
 
 # ===========================================================================
@@ -480,4 +508,5 @@ async def websocket_detections(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
+    require_control_secret()
     uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False, log_level="info")

@@ -1,7 +1,46 @@
 import type { NextConfig } from "next";
 
+const isProd = process.env.NODE_ENV === "production";
+
+// TECH DEBT: 'unsafe-inline' for scripts (Next inlines bootstrap/RSC payload scripts) until a nonce-based CSP is wired.
+// WHY 'unsafe-eval' in dev only: React refresh / HMR evals code; never allowed in production.
+// WHY https://unpkg.com in img-src: WaterGateMap loads the Leaflet marker PNGs from unpkg.
+// Fix: vendor them into /public and drop this host.
+const csp = [
+  "default-src 'self'",
+  "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com",
+  "connect-src 'self'",
+  "media-src 'self' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"}`,
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+].join("; ");
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  // WHY: the app never uses next/image, and /_next/image is a public, unauthenticated endpoint (the proxy
+  // matcher skips it) that carried unauthenticated RCE advisories up to 16.4.0. With this set the server
+  // answers 404 there (next-server.js: `imagesConfig.unoptimized` -> render404), so nothing is decoded.
+  images: { unoptimized: true },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Content-Security-Policy", value: csp },
+          // WHY: no camera/mic/geolocation/payment/USB features are used; deny them explicitly.
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

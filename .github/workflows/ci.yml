@@ -1,0 +1,98 @@
+# CI: every push and pull request runs the same gate as a manual release.
+# WHY pinned SHAs: a moved tag on a third-party action would run unreviewed code with this repo's token.
+# WHY Node 20.20.2: the droplet runs it; test on what ships. Raise both together.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20.20.2"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    name: Test, typecheck, lint, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # WHY --ignore-scripts: no dependency needs an install script to build or test here,
+      # so a compromised package's postinstall never runs in CI.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx vitest run
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Blocking: no high or critical advisory in any dependency (prod or dev). Reads the lockfile only.
+      - run: npm audit --audit-level=high
+
+  # CD, build half. The droplet is Tailscale-only (a GitHub-hosted runner cannot reach it) and has ~450 MB RAM,
+  # so Actions builds once and publishes a checksummed artifact; deploy/pull/pull-deploy.sh on the droplet pulls it.
+  # Only after test, typecheck, lint, build and audit all passed, and only for main.
+  release:
+    name: Publish build artifact
+    needs: [verify, audit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      # WHY prune: the droplet cannot run npm; the artifact carries production dependencies only.
+      - run: npm prune --omit=dev --ignore-scripts --no-audit --no-fund
+      # Boot the pruned build once; a missing runtime dependency fails here, not on the droplet.
+      - name: Smoke test pruned build
+        run: |
+          node_modules/.bin/next start -H 127.0.0.1 -p 3100 > smoke.log 2>&1 &
+          for i in $(seq 1 30); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)" = 200 ] && exit 0
+            sleep 1
+          done
+          cat smoke.log; exit 1
+      - name: Package
+        run: |
+          tar --exclude=.next/cache --exclude=.next/dev -czf "wgw-$GITHUB_SHA.tar.gz" \
+            .next public package.json package-lock.json next.config.ts node_modules
+          sha256sum "wgw-$GITHUB_SHA.tar.gz" > "wgw-$GITHUB_SHA.tar.gz.sha256"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-$GITHUB_SHA" "wgw-$GITHUB_SHA.tar.gz" "wgw-$GITHUB_SHA.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --title "build $GITHUB_SHA" --notes "Built from $GITHUB_SHA. Deployed by the droplet pull timer." --latest
