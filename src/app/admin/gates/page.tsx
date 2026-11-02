@@ -1,8 +1,9 @@
-import AppHeader from "@/components/AppHeader";
+import { ChevronDown } from "lucide-react";
 import { requireAdminPage } from "@/lib/auth/dal";
 import { listGates } from "@/lib/gatesDb";
+import StatePill from "@/components/StatePill";
 import ActionForm from "../_components/ActionForm";
-import AdminNav from "../_components/AdminNav";
+import AdminShell from "../_components/AdminShell";
 import { createGate, setGateActive, updateGate } from "../actions";
 
 const input = "input-field w-full";
@@ -28,83 +29,111 @@ function GateFields({ name, location, lat, lng, hasDevice }: { name?: string; lo
         ลองจิจูด
         <input name="lng" type="number" step="any" min={-180} max={180} required defaultValue={lng} className={input} />
       </label>
-      <label className="flex items-center gap-2 text-sm font-bold text-fg">
-        <input name="hasDevice" type="checkbox" defaultChecked={hasDevice} className="size-4 accent-accent" />
+      <label className="flex min-h-11 items-center gap-2 text-sm font-bold text-fg sm:col-span-2">
+        <input name="hasDevice" type="checkbox" defaultChecked={hasDevice} className="size-4 accent-fg" />
         มีอุปกรณ์ (STM32 และกล้อง)
       </label>
     </>
   );
 }
 
+const SUMMARY =
+  "flex cursor-pointer list-none items-center gap-4 rounded-lg px-5 py-3 transition-colors duration-150 hover:bg-surface-2 [&::-webkit-details-marker]:hidden";
+
 export default async function AdminGatesPage() {
   await requireAdminPage("/admin/gates");
   const gates = await listGates({ includeInactive: true });
+  const hidden = gates.filter((g) => !g.active).length;
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <AppHeader active="admin" isAdmin />
-      <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-6 sm:px-6">
-        <AdminNav />
-        <h1 className="text-xl font-bold text-fg">ประตูน้ำ</h1>
-
-        <section className="space-y-4 rounded-lg border border-border bg-surface p-4">
-          <h2 className="text-base font-bold text-fg">เพิ่มประตูน้ำ</h2>
-          <ActionForm action={createGate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className={label}>
-              รหัส (gate-1 ถึง gate-9999)
-              <input name="id" required pattern="gate-[0-9]{1,4}" maxLength={9} className={input} />
-            </label>
-            <GateFields />
-            <button type="submit" className="btn-primary justify-self-start whitespace-nowrap">
-              สร้างประตูน้ำ
-            </button>
-          </ActionForm>
-        </section>
-
-        <ul className="space-y-4">
+    <AdminShell title="ประตูน้ำ" subtitle={`${gates.length} แห่ง · ซ่อนอยู่ ${hidden}`}>
+      <div className="rounded-lg border border-border bg-surface">
+        {/* WHY: each gate folds to one row; its edit form opens in place, so the list fits a screen. */}
+        <ul className="divide-y divide-rule">
           {gates.map((g) => (
-            <li key={g.id} className="space-y-4 rounded-lg border border-border bg-surface p-4">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-base font-bold text-fg">{g.name || g.id}</h2>
-                {g.active ? (
-                  <span className="pill bg-on-soft text-on">
-                    <span className="size-2 rounded-full bg-on" aria-hidden="true" />
-                    ใช้งาน
+            <li key={g.id}>
+              <details className="group">
+                <summary className={SUMMARY}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-bold text-fg">{g.name || g.id}</span>
+                    <span className="mt-0.5 block truncate text-sm text-muted">
+                      {g.id} · {g.location || "ไม่ระบุที่ตั้ง"}
+                    </span>
                   </span>
-                ) : (
-                  <span className="pill bg-surface-2 text-muted">
-                    <span className="size-2 rounded-full border-2 border-dashed border-muted" aria-hidden="true" />
-                    ปิดใช้งาน
+                  <span className="hidden text-sm text-muted tabular-nums md:block">
+                    {g.lat.toFixed(4)}, {g.lng.toFixed(4)}
                   </span>
-                )}
-              </div>
-              <ActionForm action={updateGate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <input type="hidden" name="id" value={g.id} />
-                <GateFields name={g.name} location={g.location} lat={g.lat} lng={g.lng} hasDevice={g.hasDevice} />
-                <button type="submit" className="btn-secondary justify-self-start whitespace-nowrap">
-                  บันทึก
-                </button>
-              </ActionForm>
-              <ActionForm
-                action={setGateActive}
-                confirm={
-                  g.active
-                    ? `ซ่อน “${g.name || g.id}” จากแผนที่และแดชบอร์ด?`
-                    : `แสดง “${g.name || g.id}” บนแผนที่อีกครั้ง?`
-                }
-              >
-                <input type="hidden" name="id" value={g.id} />
-                <input type="hidden" name="active" value={g.active ? "false" : "true"} />
-                <button type="submit" className={`${g.active ? "btn-danger" : "btn-secondary"} whitespace-nowrap`}>
-                  {g.active ? "ซ่อนประตูน้ำนี้" : "แสดงประตูน้ำนี้"}
-                </button>
-                {/* WHY: the wording must not suggest it closes the physical gate. */}
-                <p className="mt-1.5 text-xs text-muted">ซ่อนจากแผนที่และแดชบอร์ด ไม่มีผลกับประตูน้ำจริง</p>
-              </ActionForm>
+                  <span className="hidden sm:block">
+                    {g.hasDevice ? <StatePill tone="on">มีอุปกรณ์</StatePill> : <StatePill tone="off">ยังไม่ติดตั้ง</StatePill>}
+                  </span>
+                  {/* WHY: only the exception gets a mark; a visible gate is the normal case. */}
+                  {!g.active && <StatePill tone="off">ซ่อนอยู่</StatePill>}
+                  <ChevronDown
+                    className="size-4 shrink-0 text-muted transition-transform duration-150 group-open:rotate-180"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
+                  <span className="sr-only">แก้ไข {g.name || g.id}</span>
+                </summary>
+
+                <div className="border-t border-rule px-5 pt-4 pb-5">
+                  <ActionForm action={updateGate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <input type="hidden" name="id" value={g.id} />
+                    <GateFields name={g.name} location={g.location} lat={g.lat} lng={g.lng} hasDevice={g.hasDevice} />
+                    <button type="submit" className="btn-primary justify-self-start whitespace-nowrap">
+                      บันทึกการแก้ไข
+                    </button>
+                  </ActionForm>
+                  <ActionForm
+                    action={setGateActive}
+                    className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-bg px-4 py-3"
+                    confirm={
+                      g.active
+                        ? `ซ่อน “${g.name || g.id}” จากแผนที่และแดชบอร์ด?`
+                        : `แสดง “${g.name || g.id}” บนแผนที่อีกครั้ง?`
+                    }
+                  >
+                    <input type="hidden" name="id" value={g.id} />
+                    <input type="hidden" name="active" value={g.active ? "false" : "true"} />
+                    <button type="submit" className={`${g.active ? "btn-danger" : "btn-secondary"} whitespace-nowrap`}>
+                      {g.active ? "ซ่อนประตูน้ำนี้" : "แสดงประตูน้ำนี้"}
+                    </button>
+                    {/* WHY: the wording must not suggest it closes the physical gate. */}
+                    <p className="text-sm text-muted">ซ่อนจากแผนที่และแดชบอร์ด ไม่มีผลกับประตูน้ำจริง</p>
+                  </ActionForm>
+                </div>
+              </details>
             </li>
           ))}
+          {gates.length === 0 && <li className="px-5 py-4 text-sm text-muted">ยังไม่มีประตูน้ำ เพิ่มประตูแรกด้านล่าง</li>}
         </ul>
-      </main>
-    </div>
+      </div>
+
+      <section aria-labelledby="create-gate-heading" className="mt-6 rounded-lg border border-border bg-surface p-5">
+        <h2 id="create-gate-heading" className="text-base font-bold text-fg">
+          เพิ่มประตูน้ำ
+        </h2>
+        <ActionForm action={createGate} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className={label}>
+            รหัส
+            <input
+              name="id"
+              required
+              pattern="gate-[0-9]{1,4}"
+              maxLength={9}
+              aria-describedby="gate-id-rule"
+              className={input}
+            />
+            <span id="gate-id-rule" className="text-sm font-normal text-muted">
+              รูปแบบ gate-1 ถึง gate-9999 แก้ไม่ได้หลังสร้าง
+            </span>
+          </label>
+          <GateFields />
+          <button type="submit" className="btn-primary justify-self-start whitespace-nowrap">
+            เพิ่มประตูน้ำ
+          </button>
+        </ActionForm>
+      </section>
+    </AdminShell>
   );
 }

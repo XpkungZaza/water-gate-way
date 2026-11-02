@@ -146,7 +146,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
         <span
           aria-hidden="true"
           className={`size-2.5 rounded-full ${
-            status === "connected" ? "bg-on" : status === "failed" ? "bg-danger" : "bg-warn animate-pulse"
+            status === "connected" ? "bg-on" : status === "failed" ? "bg-danger" : "bg-warn"
           }`}
         />
         <span className="text-xs font-bold text-white">
@@ -162,7 +162,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
       {/* Loading */}
       {status === "connecting" && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="size-10 rounded-full border-4 border-accent border-t-transparent animate-spin" />
+          <div className="size-8 rounded-full border-2 border-white/80 border-t-transparent animate-spin" />
         </div>
       )}
 

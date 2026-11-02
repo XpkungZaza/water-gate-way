@@ -60,3 +60,6 @@ env/
 /go2rtc.yaml
 /mqtt-bridge.service
 .env.bridge
+
+# design inspector screenshots
+/.taste-skill/

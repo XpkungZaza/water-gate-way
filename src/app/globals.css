@@ -2,17 +2,23 @@
 
 /* Design tokens from DESIGN.md (light only). Components use the generated classes
    (bg-surface, text-muted, border-border, bg-on-soft ...).
-   Recharts SVG props cannot read CSS variables, so WaterLevelChart repeats these hex values as constants. */
+   Recharts SVG props cannot read CSS variables, so WaterLevelChart repeats these hex values as constants.
+   WHY: chrome is ink only; `accent` (the brand blue) is reserved for water data and the focus ring,
+   so the state colours (on / warn / danger) stay the loudest thing on a screen. */
 @theme {
   --color-bg: #f4f5f2;
   --color-surface: #ffffff;
   --color-surface-2: #eceee9;
-  --color-border: #d3d8d0;
+  /* panel edges ~1.2:1 on white; `control` is one step stronger for inputs and outlined buttons */
+  --color-border: #e1e4df;
+  --color-rule: #eef0ec;
+  --color-control: #c9cec6;
   --color-fg: #142029;
   /* muted is ≥4.5:1 on white (WCAG AA for body text) */
   --color-muted: #55606a;
   --color-accent: #0a58a3;
-  --color-on: #157f3c;
+  /* WHY: #157f3c on on-soft measured 4.4:1; this holds 4.5:1 on on-soft and on white. */
+  --color-on: #136b35;
   --color-on-soft: #e3f3e8;
   --color-off: #3f4b57;
   --color-off-soft: #e6e9ec;
@@ -62,20 +68,21 @@
   @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
+/* Primary is near-black ink: one per screen. Press feedback is a 1px drop, transform only. */
 @utility btn-primary {
-  @apply btn bg-accent text-white hover:bg-accent/85;
+  @apply btn bg-fg text-white hover:bg-fg/85 active:translate-y-px;
 }
 
 @utility btn-secondary {
-  @apply btn border border-border bg-surface text-fg hover:bg-surface-2;
+  @apply btn border border-control bg-surface text-fg hover:bg-surface-2 active:translate-y-px;
 }
 
 @utility btn-danger {
-  @apply btn border border-danger bg-surface text-danger hover:bg-danger-soft;
+  @apply btn border border-danger bg-surface text-danger hover:bg-danger-soft active:translate-y-px;
 }
 
 @utility input-field {
-  @apply min-h-11 rounded-md border border-border bg-surface px-3 py-2 text-sm text-fg transition-colors duration-150 placeholder:text-muted/70 disabled:cursor-not-allowed disabled:opacity-60;
+  @apply min-h-11 rounded-md border border-control bg-surface px-3 py-2 text-sm text-fg transition-colors duration-150 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 @utility data-table {
@@ -84,18 +91,13 @@
 
 /* Status pill: dot + word, so colour never carries meaning alone. */
 @utility pill {
-  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold;
+  @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold;
 }
 
-/* UNKNOWN state: diagonal hatch in the unknown token at ~12% opacity, 6px stripes. */
-@utility hatch {
-  background-image: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, var(--color-unknown) 12%, transparent) 0px,
-    color-mix(in srgb, var(--color-unknown) 12%, transparent) 6px,
-    transparent 6px,
-    transparent 12px
-  );
+/* UNKNOWN state: a dashed outline and a hollow dashed dot, never a fill.
+   WHY: replaces the diagonal hatch, which tiled across every stale row and read as texture, not signal. */
+@utility pill-unknown {
+  @apply pill border border-dashed border-unknown bg-surface text-muted;
 }
 
 /* Light scrollbar */
@@ -133,6 +135,8 @@
   color: var(--color-fg);
   border: 1px solid var(--color-border);
   border-radius: 8px;
+  /* a popup floats: the one place a resting shadow is earned */
+  box-shadow: 0 4px 16px rgb(20 32 41 / 0.08);
 }
 .leaflet-container .leaflet-popup-tip {
   background: var(--color-surface);

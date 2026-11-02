@@ -24,8 +24,8 @@ export default function AdminNav() {
               <Link
                 href={tab.href}
                 aria-current={current ? "page" : undefined}
-                className={`flex min-h-11 cursor-pointer items-center border-b-2 px-4 text-sm font-bold transition-colors duration-150 ${
-                  current ? "border-accent text-accent" : "border-transparent text-muted hover:border-border hover:text-fg"
+                className={`flex min-h-11 cursor-pointer items-center border-b-2 px-3 text-sm font-bold transition-colors duration-150 ${
+                  current ? "border-fg text-fg" : "border-transparent text-muted hover:border-control hover:text-fg"
                 }`}
               >
                 {tab.label}

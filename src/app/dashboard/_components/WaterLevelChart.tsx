@@ -12,17 +12,19 @@ import {
   ResponsiveContainer,
   type TooltipValueType,
 } from "recharts";
-import { Droplets } from "lucide-react";
+import { Download } from "lucide-react";
+import { LEVEL_DANGER_M, LEVEL_MAX_M, LEVEL_WARN_M } from "./levels";
 
 // WHY: Recharts takes SVG attributes, which cannot read CSS variables; these mirror the @theme tokens in globals.css.
 const CHART = {
   accent: "#0a58a3",
-  grid: "#d3d8d0",
-  axis: "#d3d8d0",
+  grid: "#eef0ec",
+  axis: "#c9cec6",
   tick: "#55606a",
-  on: "#157f3c",
   warn: "#a35207",
   danger: "#b4231b",
+  fg: "#142029",
+  border: "#e1e4df",
   /** Ring around the active dot: the panel surface, so it reads as a cut-out. */
   bgRing: "#ffffff",
 } as const;
@@ -54,14 +56,13 @@ const formatTooltip = (value: TooltipValueType | undefined): [string, string] =>
   return [`${num.toFixed(2)} ม.`, "ระดับน้ำ"];
 };
 
-/* Thresholds in Thai words, so colour never carries the meaning alone (no P1/P2 codes). */
+/* Thresholds in Thai words, so colour never carries the meaning alone. */
 const REFS = [
-  { y: 1, color: CHART.on, label: "1 ม." },
-  { y: 3, color: CHART.warn, label: "3 ม. — ระดับเตือน" },
-  { y: 5, color: CHART.danger, label: "5 ม. — ระดับอันตราย" },
-  { y: 7, color: CHART.danger, label: "7 ม." },
+  { y: LEVEL_WARN_M, color: CHART.warn, label: `ระดับเตือน ${LEVEL_WARN_M} ม.` },
+  { y: LEVEL_DANGER_M, color: CHART.danger, label: `ระดับอันตราย ${LEVEL_DANGER_M} ม.` },
 ];
 
+/** History of the stored water levels (the last 24 rows), with the CSV export of the same table. */
 export default function WaterLevelChart() {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +84,7 @@ export default function WaterLevelChart() {
       // WHY: clear stale points so the chart never shows data we failed to refresh
       console.error("[Dashboard] Failed to fetch water levels:", err);
       setData([]);
-      setError("โหลดข้อมูลระดับน้ำไม่สำเร็จ");
+      setError("โหลดประวัติระดับน้ำไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
@@ -95,53 +96,58 @@ export default function WaterLevelChart() {
     return () => clearInterval(id);
   }, [fetchWaterLevels]);
 
-  const current = data.at(-1)?.level;
-
   return (
-    <section aria-labelledby="water-level-heading" className="rounded-lg border border-border bg-surface p-4 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 id="water-level-heading" className="flex items-center gap-2 text-base font-bold text-fg">
-          <Droplets className="size-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
-          ระดับน้ำ — 24 ชั่วโมง
-        </h2>
-        {current !== undefined && (
-          <span className="rounded-full bg-accent/10 px-3 py-1 text-sm font-bold tabular-nums text-accent">
-            ปัจจุบัน {current.toFixed(2)} ม.
-          </span>
-        )}
+    <div className="flex min-w-0 flex-col">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h3 className="text-sm font-bold text-fg">ประวัติ 24 ค่าล่าสุด</h3>
+        <a
+          id="download-graph-data"
+          href="/api/water-level/download"
+          download="water_levels_report.csv"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg"
+        >
+          <Download className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          ดาวน์โหลด CSV
+        </a>
       </div>
 
-      {loading && data.length === 0 ? (
-        <div className="flex h-64 w-full items-center justify-center sm:h-80">
-          <div className="flex flex-col items-center gap-2">
-            <div className="size-8 rounded-full border-4 border-accent border-t-transparent animate-spin" />
-            <span className="text-xs text-muted">กำลังโหลดข้อมูล…</span>
-          </div>
-        </div>
-      ) : data.length === 0 ? (
-        <div className="flex h-64 w-full items-center justify-center sm:h-80">
-          <span className={`text-xs ${error ? "text-danger" : "text-muted"}`}>{error ?? "ยังไม่มีข้อมูลระดับน้ำ"}</span>
+      {/* WHY: every state keeps the plot's height, so nothing below jumps when the data lands. */}
+      {data.length === 0 ? (
+        <div className="flex h-60 w-full items-center justify-center rounded-md border border-dashed border-border">
+          <span className={`text-sm ${error ? "text-danger" : "text-muted"}`}>
+            {loading ? "กำลังโหลดข้อมูล…" : (error ?? "ยังไม่มีข้อมูลระดับน้ำที่บันทึกไว้")}
+          </span>
+          {error && (
+            <button
+              type="button"
+              onClick={fetchWaterLevels}
+              className="ml-3 cursor-pointer text-sm font-bold text-fg underline underline-offset-2 hover:no-underline"
+            >
+              ลองอีกครั้ง
+            </button>
+          )}
         </div>
       ) : (
-        <div className="h-64 w-full sm:h-80">
+        <div className="h-60 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} strokeOpacity={0.7} />
+            <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke={CHART.grid} />
               <XAxis
                 dataKey="time"
-                tick={{ fontSize: 11, fill: CHART.tick }}
+                tick={{ fontSize: 12, fill: CHART.tick }}
                 tickLine={false}
                 axisLine={{ stroke: CHART.axis }}
                 interval="preserveStartEnd"
+                minTickGap={24}
               />
               {/* Fixed width wide enough for "8 ม." ticks, so the unit never clips at 375px. */}
               <YAxis
-                domain={[0, 8]}
-                ticks={[0, 1, 2, 3, 4, 5, 6, 7, 8]}
-                width={48}
-                tick={{ fontSize: 11, fill: CHART.tick }}
+                domain={[0, LEVEL_MAX_M]}
+                ticks={[0, 2, 4, 6, 8]}
+                width={44}
+                tick={{ fontSize: 12, fill: CHART.tick }}
                 tickLine={false}
-                axisLine={{ stroke: CHART.axis }}
+                axisLine={false}
                 unit=" ม."
               />
               <Tooltip
@@ -149,37 +155,39 @@ export default function WaterLevelChart() {
                 cursor={{ stroke: CHART.tick, strokeOpacity: 0.4 }}
                 contentStyle={{
                   backgroundColor: "#ffffff",
-                  border: "1px solid #d3d8d0",
-                  borderRadius: 8,
-                  color: "#142029",
+                  border: `1px solid ${CHART.border}`,
+                  borderRadius: 6,
+                  color: CHART.fg,
                   fontSize: 12,
                 }}
-                labelStyle={{ color: "#55606a" }}
-                itemStyle={{ color: "#142029" }}
+                labelStyle={{ color: CHART.tick }}
+                itemStyle={{ color: CHART.fg }}
               />
               {REFS.map((r) => (
                 <ReferenceLine
                   key={r.y}
                   y={r.y}
                   stroke={r.color}
-                  strokeDasharray="6 3"
-                  // WHY: insideTopRight keeps every label inside the SVG, so long Thai threshold
+                  strokeDasharray="4 3"
+                  // WHY: inside positions keep every label inside the SVG, so long Thai threshold
                   // labels can never be clipped off the chart edge at narrow widths.
-                  label={{ value: r.label, position: "insideTopRight", fill: r.color, fontSize: 10 }}
+                  label={{ value: r.label, position: "insideTopLeft", fill: r.color, fontSize: 12 }}
                 />
               ))}
+              {/* Straight segments: a smoothed curve would invent levels between readings. */}
               <Line
-                type="monotone"
+                type="linear"
                 dataKey="level"
                 stroke={CHART.accent}
-                strokeWidth={2.5}
+                strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 5, fill: CHART.accent, stroke: CHART.bgRing, strokeWidth: 2 }}
+                isAnimationActive={false}
+                activeDot={{ r: 4, fill: CHART.accent, stroke: CHART.bgRing, strokeWidth: 2 }}
               />
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
-    </section>
+    </div>
   );
 }

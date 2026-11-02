@@ -1,34 +1,22 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { List, MapPin } from "lucide-react";
+import { ChevronRight, List } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import WaterGateMapLoader from "@/components/WaterGateMapLoader";
+import StatePill from "@/components/StatePill";
 import { requirePageUser } from "@/lib/auth/dal";
 import { listGates } from "@/lib/gatesDb";
-
-function DeviceBadge({ hasDevice }: { hasDevice: boolean }) {
-  return hasDevice ? (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-on-soft px-2 py-0.5 text-xs font-bold text-on">
-      <span className="size-1.5 rounded-full bg-on" aria-hidden="true" />
-      มีอุปกรณ์
-    </span>
-  ) : (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-bold text-muted">
-      <span className="size-1.5 rounded-full border-2 border-dashed border-unknown" aria-hidden="true" />
-      ยังไม่ติดตั้ง
-    </span>
-  );
-}
 
 export default async function HomePage() {
   const user = await requirePageUser("/");
   const gates = await listGates();
+  const withDevice = gates.filter((g) => g.hasDevice).length;
   return (
     <main className="flex min-h-dvh w-full flex-col bg-bg lg:h-dvh lg:overflow-hidden">
       <AppHeader active="map" isAdmin={user.role === "admin"} />
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Mobile: map first (50dvh, so the list below is reachable) then the list, page scrolls;
-            desktop: 320px list left, map fills the rest. */}
+            desktop: 360px list left, map fills the rest. */}
         <div className="relative order-1 h-[50dvh] w-full shrink-0 lg:order-2 lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">
           <Suspense fallback={null}>
             <WaterGateMapLoader gates={gates} />
@@ -36,7 +24,7 @@ export default async function HomePage() {
           {/* WHY: z-[1000] sits above Leaflet's panes and controls. */}
           <a
             href="#gate-list"
-            className="absolute right-3 bottom-3 z-[1000] inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-bold text-fg transition-colors duration-150 hover:bg-surface-2 lg:hidden"
+            className="absolute right-3 bottom-3 z-[1000] inline-flex min-h-11 items-center gap-2 rounded-md border border-control bg-surface px-3 text-sm font-bold text-fg transition-colors duration-150 hover:bg-surface-2 lg:hidden"
           >
             <List className="size-4" strokeWidth={1.75} aria-hidden="true" />
             ดูรายการประตูน้ำ
@@ -45,31 +33,46 @@ export default async function HomePage() {
 
         <aside
           id="gate-list"
-          aria-label="รายการประตูน้ำ"
-          className="order-2 flex min-h-0 shrink-0 scroll-mt-14 flex-col border-t border-border bg-surface lg:order-1 lg:w-80 lg:border-t-0 lg:border-r"
+          aria-labelledby="gate-list-heading"
+          className="order-2 flex min-h-0 shrink-0 scroll-mt-12 flex-col border-t border-border bg-surface lg:order-1 lg:w-[360px] lg:border-t-0 lg:border-r"
         >
-          <header className="border-b border-border px-4 py-3">
-            <h2 className="text-base font-bold text-fg">ประตูน้ำ</h2>
+          <header className="px-5 pt-5 pb-3">
+            <h1 id="gate-list-heading" className="text-2xl font-bold text-fg">
+              ประตูน้ำ
+            </h1>
+            <p className="mt-1 text-sm text-muted tabular-nums">
+              {gates.length} แห่ง · มีอุปกรณ์ {withDevice} แห่ง
+            </p>
           </header>
-          <ul className="divide-y divide-border overflow-y-auto">
+          <ul className="overflow-y-auto px-2 pb-3">
             {gates.map((g) => (
               <li key={g.id}>
                 <Link
                   href={`/dashboard?gate=${encodeURIComponent(g.id)}`}
-                  className="block px-4 py-3 transition-colors duration-150 hover:bg-surface-2"
+                  className="group flex items-center gap-3 rounded-md px-3 py-3 transition-colors duration-150 hover:bg-surface-2"
                 >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-bold text-fg">{g.name}</span>
-                    <DeviceBadge hasDevice={g.hasDevice} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-bold text-fg">{g.name}</span>
+                    <span className="mt-0.5 block truncate text-sm text-muted">{g.location || g.id}</span>
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                    <MapPin className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                    <span className="truncate">{g.location || g.id}</span>
-                  </span>
+                  {g.hasDevice ? (
+                    <StatePill tone="on">มีอุปกรณ์</StatePill>
+                  ) : (
+                    <StatePill tone="off">ยังไม่ติดตั้ง</StatePill>
+                  )}
+                  <ChevronRight
+                    className="size-4 shrink-0 text-muted transition-transform duration-150 group-hover:translate-x-0.5"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
                 </Link>
               </li>
             ))}
-            {gates.length === 0 && <li className="px-4 py-6 text-sm text-muted">ยังไม่มีประตูน้ำในระบบ</li>}
+            {gates.length === 0 && (
+              <li className="mx-3 rounded-md border border-dashed border-border px-4 py-4 text-sm text-muted">
+                ยังไม่มีประตูน้ำในระบบ ผู้ดูแลระบบเพิ่มได้ที่หน้าจัดการประตูน้ำ
+              </li>
+            )}
           </ul>
         </aside>
       </div>

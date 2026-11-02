@@ -89,7 +89,7 @@ export default function DeviceSwitch({
         } ${
           pressed
             ? softCls
-            : "border border-fg/30 bg-surface text-fg hover:bg-surface-2"
+            : "border border-control bg-surface text-fg hover:bg-surface-2 active:translate-y-px"
         }`}
       >
         {pressed && <Check className="size-4" strokeWidth={1.75} aria-hidden="true" />}
@@ -111,7 +111,7 @@ export default function DeviceSwitch({
           </span>
         );
       case "waiting":
-        return <span className="text-accent">ส่งแล้ว: {label} — รออุปกรณ์ยืนยัน</span>;
+        return <span className="text-fg">ส่งแล้ว: {label} รออุปกรณ์ยืนยัน</span>;
       case "timeout":
         return (
           <span className="inline-flex items-center gap-2 text-danger">
@@ -138,7 +138,7 @@ export default function DeviceSwitch({
   };
 
   return (
-    <div className="py-4">
+    <div className="py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex min-w-0 items-center gap-2.5">
           <Icon
@@ -146,18 +146,17 @@ export default function DeviceSwitch({
             strokeWidth={1.75}
             aria-hidden="true"
           />
-          <span className="text-base font-bold text-fg">{name}</span>
+          <span className="truncate text-base font-bold text-fg">{name}</span>
         </div>
 
-        {/* State readout: word + dot, never colour alone. The pill is THE indicator, so it is the
-            largest element in the row; min-w keeps the three states equal in width. */}
+        {/* State readout: word + dot, never colour alone. min-w keeps the three states equal in width. */}
         <span
-          className={`inline-flex min-w-40 items-center justify-center gap-2 rounded-full px-3 py-2 text-base font-bold ${
+          className={`inline-flex min-w-32 shrink-0 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold ${
             view === "on"
               ? TONE[tone].soft
               : view === "off"
                 ? "bg-off-soft text-off"
-                : "hatch border border-border text-muted"
+                : "border border-dashed border-unknown text-muted"
           }`}
         >
           <span
@@ -167,7 +166,7 @@ export default function DeviceSwitch({
                 ? TONE[tone].dot
                 : view === "off"
                   ? "bg-off"
-                  : "border-2 border-dashed border-unknown"
+                  : "border-[1.5px] border-unknown"
             }`}
           />
           {view === "on" ? "ทำงาน" : view === "off" ? "ปิดอยู่" : "ไม่ทราบสถานะ"}
@@ -176,14 +175,14 @@ export default function DeviceSwitch({
 
       {!readOnly && (
         <>
-          <div role="group" aria-label={`ควบคุม${name}`} className="mt-3 grid grid-cols-2 gap-2">
+          <div role="group" aria-label={`ควบคุม${name}`} className="mt-2.5 grid grid-cols-2 gap-2">
             {segment("off")}
             {segment("on")}
           </div>
 
           {/* Reserved status line: always rendered at one fixed height, empty when idle, so
               sending/waiting/timeout/confirmed never push the other rows down. */}
-          <p className="mt-2 flex min-h-5 items-center gap-2 text-sm" aria-live="polite">
+          <p className="mt-1.5 flex min-h-5 items-center gap-2 text-sm" aria-live="polite">
             {statusLine()}
           </p>
         </>

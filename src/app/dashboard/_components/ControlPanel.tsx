@@ -118,18 +118,14 @@ export default function ControlPanel({ devices, stale, readOnly = false }: Props
 
   return (
     <section aria-labelledby="controls-heading" className="rounded-lg border border-border bg-surface">
-      <header className="border-b border-border px-4 py-3">
+      <header className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
         <h2 id="controls-heading" className="text-base font-bold text-fg">
           {readOnly ? "สถานะอุปกรณ์" : "ควบคุมอุปกรณ์"}
         </h2>
+        {/* WHY: the page title row already says the link is down; here one quiet line says what it
+            means for these switches, instead of a second banner. */}
+        {stale && <span className="text-sm text-muted">สถานะอาจไม่ตรงความจริง</span>}
       </header>
-
-      {stale && (
-        <div className="hatch flex items-center gap-2.5 border-b border-border px-4 py-2.5 text-sm font-medium text-fg">
-          <span className="size-2.5 shrink-0 rounded-full border-2 border-dashed border-unknown" aria-hidden="true" />
-          ขาดการเชื่อมต่อ — สถานะอุปกรณ์อาจไม่ตรงความจริง
-        </div>
-      )}
 
       {!readOnly && error && (
         <div
@@ -141,7 +137,7 @@ export default function ControlPanel({ devices, stale, readOnly = false }: Props
         </div>
       )}
 
-      <div className="divide-y divide-border px-4">
+      <div className="divide-y divide-rule px-4">
         {rows.map((row) => (
           <DeviceSwitch
             key={row.key}
