@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { register, type RegisterState } from "./actions";
+import PasswordField from "@/components/PasswordField";
 
 function message(state: RegisterState): string | null {
   switch (state?.error) {
@@ -36,6 +37,9 @@ export default function RegisterForm() {
           name="email"
           type="email"
           autoComplete="email"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
           required
           maxLength={254}
           value={email}
@@ -45,43 +49,37 @@ export default function RegisterForm() {
         />
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="password" className="block text-sm font-bold text-fg">
-          รหัสผ่าน
-        </label>
-        <input
+        <PasswordField
           id="password"
           name="password"
-          type="password"
+          label="รหัสผ่าน"
           autoComplete="new-password"
           required
           minLength={8}
           maxLength={1024}
-          aria-describedby="password-rule"
-          aria-invalid={state?.error === "password" || undefined}
-          className="input-field w-full"
+          describedBy="password-rule"
+          invalid={state?.error === "password"}
+          hint={
+            <p id="password-rule" className="text-sm text-muted">
+              อย่างน้อย 8 ตัวอักษร
+            </p>
+          }
         />
-        <p id="password-rule" className="text-sm text-muted">
-          อย่างน้อย 8 ตัวอักษร
-        </p>
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="confirm" className="block text-sm font-bold text-fg">
-          ยืนยันรหัสผ่าน
-        </label>
-        <input
+        <PasswordField
           id="confirm"
           name="confirm"
-          type="password"
+          label="ยืนยันรหัสผ่าน"
           autoComplete="new-password"
           required
           minLength={8}
           maxLength={1024}
-          aria-invalid={state?.error === "mismatch" || undefined}
-          className="input-field w-full"
+          invalid={state?.error === "mismatch"}
         />
       </div>
       {error && (
-        <p role="alert" className="flex items-center gap-2 text-sm font-bold text-danger">
+        <p key={error} role="alert" className="anim-rise-in flex items-center gap-2 text-sm font-bold text-danger">
           <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
           {error}
         </p>

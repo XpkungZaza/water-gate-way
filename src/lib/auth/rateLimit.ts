@@ -35,3 +35,5 @@ export const controlByUser = createRateLimiter({ limit: 1, windowMs: 1_000 });
 // memory/CPU even when an attacker rotates IPs, the per-IP one stops a single client filling the users table.
 export const registerByIp = createRateLimiter({ limit: 5, windowMs: 60 * 60_000 });
 export const registerGlobal = createRateLimiter({ limit: 50, windowMs: 60 * 60_000 });
+// WHY: restore redeems a token with no session; bound guessing without breaking a 30-day renewal cadence.
+export const restoreByIp = createRateLimiter({ limit: 30, windowMs: 15 * 60_000 });

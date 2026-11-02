@@ -109,7 +109,7 @@ export default function WaterLevelChart() {
           id="download-graph-data"
           href="/api/water-level/download"
           download="water_levels_report.csv"
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-fg"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm text-muted transition-colors duration-(--dur-base) hover:bg-surface-2 hover:text-fg"
         >
           <Download className="size-4" strokeWidth={1.75} aria-hidden="true" />
           ดาวน์โหลด CSV

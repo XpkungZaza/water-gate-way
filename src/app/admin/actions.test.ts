@@ -197,17 +197,18 @@ describe("setUserDisabled", () => {
     expect(h.query).not.toHaveBeenCalled();
   });
 
-  it("disable: update, then delete that user's sessions (forces logout), then audit", async () => {
+  it("disable: update, then delete that user's sessions and remember tokens (forces logout), then audit", async () => {
     expect(await setUserDisabled(undefined, form({ id: OTHER_ID, disabled: "true" }))).toBeUndefined();
     expect(h.query).toHaveBeenNthCalledWith(1, "update users set disabled = $1 where id = $2", [true, OTHER_ID]);
     expect(h.query).toHaveBeenNthCalledWith(2, "delete from sessions where user_id = $1", [OTHER_ID]);
+    expect(h.query).toHaveBeenNthCalledWith(3, "delete from remember_tokens where user_id = $1", [OTHER_ID]);
     expect(audits()).toEqual([[ADMIN_ID, "user.disable", `user:${OTHER_ID}`, "203.0.113.9"]]);
   });
 
-  it("enable: update only, sessions untouched, audit", async () => {
+  it("enable: update only, sessions and remember tokens untouched, audit", async () => {
     expect(await setUserDisabled(undefined, form({ id: OTHER_ID, disabled: "false" }))).toBeUndefined();
     expect(h.query).toHaveBeenCalledTimes(2); // update + audit
-    expect(calls(/delete from sessions/i)).toHaveLength(0);
+    expect(calls(/delete from (sessions|remember_tokens)/i)).toHaveLength(0);
     expect(audits()[0][1]).toBe("user.enable");
   });
 });
@@ -231,11 +232,12 @@ describe("resetUserPassword", () => {
     expect(calls(/delete from sessions/i)).toHaveLength(0);
   });
 
-  it("happy path: stores the hash, deletes sessions, audits; the plain password never reaches SQL or the audit", async () => {
+  it("happy path: stores the hash, deletes sessions and remember tokens, audits; the plain password never reaches SQL or the audit", async () => {
     expect(await resetUserPassword(undefined, form({ id: OTHER_ID, password: "longenough1" }))).toBeUndefined();
     expect(hashPassword).toHaveBeenCalledWith("longenough1");
     expect(h.query).toHaveBeenNthCalledWith(1, "update users set password_hash = $1 where id = $2", ["scrypt$NEW", OTHER_ID]);
     expect(h.query).toHaveBeenNthCalledWith(2, "delete from sessions where user_id = $1", [OTHER_ID]);
+    expect(h.query).toHaveBeenNthCalledWith(3, "delete from remember_tokens where user_id = $1", [OTHER_ID]);
     expect(JSON.stringify(h.query.mock.calls)).not.toContain("longenough1");
     expect(audits()).toEqual([[ADMIN_ID, "user.password_reset", `user:${OTHER_ID}`, "203.0.113.9"]]);
   });

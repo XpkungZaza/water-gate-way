@@ -35,7 +35,7 @@ function Shell({ isAdmin, children }: { isAdmin: boolean; children: ReactNode })
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
       <AppHeader active={null} isAdmin={isAdmin} />
-      <main className="mx-auto w-full max-w-[1376px] flex-1 px-4 pt-6 pb-12 sm:px-6 lg:px-8">{children}</main>
+      <main id="main" className="mx-auto w-full max-w-[1376px] flex-1 px-4 pt-6 pb-12 sm:px-6 lg:px-8">{children}</main>
     </div>
   );
 }

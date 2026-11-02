@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUser, SESSION_COOKIE, type SessionUser } from "./session";
+import { REMEMBER_COOKIE } from "./remember";
 
 type Role = SessionUser["role"];
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
@@ -29,7 +30,14 @@ export const requireUser = cache(async (minRole: Role = "viewer"): Promise<Sessi
   return user;
 });
 
-/** For server-component pages: unauthenticated -> redirect to /login?next=<next>; other errors rethrow. */
+// WHY: a remember cookie means /login is not the right target — the restore endpoint rotates the
+// token and mints a session; without the cookie it is /login as before.
+async function unauthRedirect(next: string): Promise<string> {
+  const base = (await cookies()).has(REMEMBER_COOKIE) ? "/api/auth/restore" : "/login";
+  return `${base}?next=${encodeURIComponent(next)}`;
+}
+
+/** For server-component pages: unauthenticated -> redirect to /login or /api/auth/restore; other errors rethrow. */
 export async function requirePageUser(next: string): Promise<SessionUser> {
   let user: SessionUser | null = null;
   try {
@@ -38,12 +46,12 @@ export async function requirePageUser(next: string): Promise<SessionUser> {
     if (!(e instanceof AuthError)) throw e;
   }
   // WHY: redirect() throws; Next requires it outside the try block.
-  if (!user) redirect(`/login?next=${encodeURIComponent(next)}`);
+  if (!user) redirect(await unauthRedirect(next));
   return user;
 }
 
 /**
- * For admin pages: unauthenticated -> redirect to /login; logged in but not admin -> notFound().
+ * For admin pages: unauthenticated -> redirect (login or restore); logged in but not admin -> notFound().
  * WHY: a 404 for non-admins does not reveal that /admin exists.
  */
 export async function requireAdminPage(next: string): Promise<SessionUser> {
@@ -55,7 +63,7 @@ export async function requireAdminPage(next: string): Promise<SessionUser> {
     if (e.code === "forbidden") notFound();
   }
   // WHY: redirect() and notFound() throw; both stay outside the try block.
-  if (!user) redirect(`/login?next=${encodeURIComponent(next)}`);
+  if (!user) redirect(await unauthRedirect(next));
   return user;
 }
 

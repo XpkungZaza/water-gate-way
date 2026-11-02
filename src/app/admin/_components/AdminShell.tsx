@@ -15,7 +15,7 @@ export default function AdminShell({
   return (
     <div className="flex min-h-dvh flex-col bg-bg">
       <AppHeader active="admin" isAdmin />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-4 pb-12 sm:px-6">
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pt-4 pb-12 sm:px-6">
         <AdminNav />
         <div className="mt-6 mb-6">
           <h1 className="text-2xl font-bold text-fg">{title}</h1>

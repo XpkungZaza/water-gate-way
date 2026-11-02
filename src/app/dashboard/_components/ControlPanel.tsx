@@ -142,7 +142,7 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
       {!readOnly && error && (
         <div
           role="alert"
-          className="mx-4 mt-3 flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
+          className="anim-rise-in mx-4 mt-3 flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
         >
           <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
           {error}

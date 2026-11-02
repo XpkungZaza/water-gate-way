@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { CircleAlert } from "lucide-react";
 import { signIn } from "./actions";
+import PasswordField from "@/components/PasswordField";
 
 const MESSAGES = {
   invalid: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
@@ -25,25 +26,27 @@ export default function LoginForm({ next }: { next: string }) {
           name="email"
           type="email"
           autoComplete="email"
+          inputMode="email"
+          autoCapitalize="none"
+          spellCheck={false}
           required
           className="input-field w-full"
         />
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="password" className="block text-sm font-bold text-fg">
-          รหัสผ่าน
-        </label>
-        <input
+        <PasswordField
           id="password"
           name="password"
-          type="password"
+          label="รหัสผ่าน"
           autoComplete="current-password"
           required
-          className="input-field w-full"
         />
       </div>
+      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-fg">
+        <input type="checkbox" name="remember" id="remember" className="size-4 accent-fg" /> จดจำฉันไว้ในอุปกรณ์นี้ 30 วัน
+      </label>
       {error && (
-        <p role="alert" className="flex items-center gap-2 text-sm font-bold text-danger">
+        <p key={error} role="alert" className="anim-rise-in flex items-center gap-2 text-sm font-bold text-danger">
           <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
           {error}
         </p>

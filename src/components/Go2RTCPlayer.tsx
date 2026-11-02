@@ -234,7 +234,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
       <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
         <span
           aria-hidden="true"
-          className={`size-2.5 rounded-full ${
+          className={`size-2.5 rounded-full transition-colors duration-(--dur-base) ${
             status === "connected" ? "bg-on" : status === "failed" ? "bg-danger" : "bg-warn"
           }`}
         />
@@ -250,7 +250,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
 
       {/* Loading */}
       {status === "connecting" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+        <div className="anim-fade-in absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="size-8 rounded-full border-2 border-white/80 border-t-transparent animate-spin" />
         </div>
       )}
@@ -258,7 +258,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
       {/* Error. WHY: centred with side padding so the heading clears the status chip at 375px;
           secondary (outline) styling stays readable on black. */}
       {status === "failed" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4">
+        <div className="anim-fade-in absolute inset-0 flex items-center justify-center bg-black/80 px-4">
           <div className="flex max-w-full flex-col items-center gap-3 text-center">
             <p className="text-sm font-bold text-white">เชื่อมต่อกล้องไม่สำเร็จ</p>
             <button

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { hashPassword, needsRehash, verifyPassword } from "@/lib/auth/password";
 import { createSession, revokeSession, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth/session";
+import { issueRememberToken, REMEMBER_COOKIE, rememberCookieOptions, revokeRememberToken } from "@/lib/auth/remember";
 import { loginByEmail, loginByIp } from "@/lib/auth/rateLimit";
 import { safeNext } from "@/lib/auth/safeNext";
 import { clientIp } from "@/lib/http/clientIp";
@@ -41,6 +42,16 @@ export async function signIn(_prev: SignInState, form: FormData): Promise<SignIn
     const { token, expiresAt } = await createSession(u.id);
     (await cookies()).set(SESSION_COOKIE, token, sessionCookieOptions(expiresAt));
 
+    // WHY: its own try: a failed issue (e.g. migration not applied) must not block a correct login.
+    if (form.get("remember") === "on") {
+      try {
+        const remember = await issueRememberToken(u.id, (await headers()).get("user-agent"));
+        (await cookies()).set(REMEMBER_COOKIE, remember.value, rememberCookieOptions(remember.expiresAt));
+      } catch {
+        console.error("[auth/signIn] remember token failed");
+      }
+    }
+
     // WHY: the password is verified right now, so this is the only moment to upgrade a legacy bcrypt row to scrypt.
     // WHY: its own try: a failed upgrade must not block a correct login (the row stays bcrypt and retries next time).
     if (needsRehash(u.password_hash)) {
@@ -64,6 +75,13 @@ export async function signOut(): Promise<void> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (token) await revokeSession(token);
+  // WHY: its own try: a broken remember store must not leave the browser holding an undeletable cookie set.
+  try {
+    await revokeRememberToken(store.get(REMEMBER_COOKIE)?.value);
+  } catch {
+    console.error("[auth/signOut] remember revoke failed");
+  }
   store.delete(SESSION_COOKIE);
+  store.delete(REMEMBER_COOKIE);
   redirect("/login");
 }

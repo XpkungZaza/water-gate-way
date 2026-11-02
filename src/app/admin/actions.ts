@@ -104,7 +104,10 @@ export async function setUserDisabled(_prev: AdminState, form: FormData): Promis
   const { rowCount } = await db.query("update users set disabled = $1 where id = $2", [disabled, id]);
   if (!rowCount) return { error: "ไม่พบผู้ใช้" };
   // WHY: getSessionUser already rejects disabled users; deleting their sessions ends them now and leaves no stale rows.
-  if (disabled) await db.query("delete from sessions where user_id = $1", [id]);
+  if (disabled) {
+    await db.query("delete from sessions where user_id = $1", [id]);
+    await db.query("delete from remember_tokens where user_id = $1", [id]);
+  }
   await audit(actor.id, disabled ? "user.disable" : "user.enable", `user:${id}`);
   revalidatePath("/admin/users");
 }
@@ -119,8 +122,9 @@ export async function resetUserPassword(_prev: AdminState, form: FormData): Prom
   const passwordHash = await hashPassword(password);
   const { rowCount } = await db.query("update users set password_hash = $1 where id = $2", [passwordHash, id]);
   if (!rowCount) return { error: "ไม่พบผู้ใช้" };
-  // WHY: sessions opened before the reset must not survive it.
+  // WHY: sessions and remembered devices opened before the reset must not survive it.
   await db.query("delete from sessions where user_id = $1", [id]);
+  await db.query("delete from remember_tokens where user_id = $1", [id]);
   await audit(actor.id, "user.password_reset", `user:${id}`);
   revalidatePath("/admin/users");
 }

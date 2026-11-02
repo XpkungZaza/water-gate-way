@@ -5,7 +5,7 @@ import { Wordmark } from "@/components/AppHeader";
 import { getUser } from "@/lib/auth/dal";
 import RegisterForm from "./RegisterForm";
 
-export const metadata: Metadata = { title: "สมัครใช้งาน · Water Gate Way" };
+export const metadata: Metadata = { title: "สมัครใช้งาน" };
 
 export default async function RegisterPage() {
   // WHY: a signed-in user has nothing to sign up for.

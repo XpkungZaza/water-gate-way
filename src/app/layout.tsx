@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 
@@ -13,8 +13,19 @@ const lineSeed = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Water Gate Way — ระบบติดตามและควบคุมประตูน้ำ",
+  title: {
+    template: "%s · Water Gate Way",
+    default: "Water Gate Way",
+  },
   description: "ระบบติดตามระดับน้ำ ควบคุมปั๊ม และกล้อง สำหรับประตูน้ำชลประทาน",
+  robots: { index: false, follow: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#f4f5f2",
+  colorScheme: "light",
 };
 
 export default function RootLayout({

@@ -84,7 +84,7 @@ export default function DeviceSwitch({
         onClick={() => {
           if (!busy) onSend(cmd);
         }}
-        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-150 ${
+        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-(--dur-base) ${
           busy ? "cursor-not-allowed" : "cursor-pointer"
         } ${
           pressed
@@ -151,7 +151,7 @@ export default function DeviceSwitch({
 
         {/* State readout: word + dot, never colour alone. min-w keeps the three states equal in width. */}
         <span
-          className={`inline-flex min-w-32 shrink-0 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold ${
+          className={`inline-flex min-w-32 shrink-0 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold transition-colors duration-(--dur-base) ${
             view === "on"
               ? TONE[tone].soft
               : view === "off"
@@ -161,7 +161,7 @@ export default function DeviceSwitch({
         >
           <span
             aria-hidden="true"
-            className={`size-2.5 shrink-0 rounded-full ${
+            className={`size-2.5 shrink-0 rounded-full transition-colors duration-(--dur-base) ${
               view === "on"
                 ? TONE[tone].dot
                 : view === "off"

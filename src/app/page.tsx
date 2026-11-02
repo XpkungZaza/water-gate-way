@@ -12,7 +12,7 @@ export default async function HomePage() {
   const gates = await listGates();
   const withDevice = gates.filter((g) => g.hasDevice).length;
   return (
-    <main className="flex min-h-dvh w-full flex-col bg-bg lg:h-dvh lg:overflow-hidden">
+    <main id="main" className="flex min-h-dvh w-full flex-col bg-bg lg:h-dvh lg:overflow-hidden">
       <AppHeader active="map" isAdmin={user.role === "admin"} />
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Mobile: map first (50dvh, so the list below is reachable) then the list, page scrolls;

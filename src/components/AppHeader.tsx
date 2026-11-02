@@ -26,6 +26,13 @@ export function Wordmark({ className = "h-16 w-auto" }: { className?: string }) 
 export default function AppHeader({ active, isAdmin }: AppHeaderProps) {
   return (
     <header className="z-[1000] flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-surface px-4 sm:px-6">
+      {/* Visually hidden until focused; the global :focus-visible outline gives it the accent ring. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[1100] focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-md focus:bg-surface focus:px-3 focus:text-sm focus:font-bold focus:text-fg"
+      >
+        ข้ามไปยังเนื้อหา
+      </a>
       <Link href="/" className="flex min-w-0 items-center gap-2 rounded-md">
         <BrandMark />
         {/* On a phone the mark alone carries the brand; the name stays for screen readers. */}

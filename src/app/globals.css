@@ -65,7 +65,7 @@
 /* Shared component classes. One definition each, so every page uses the same look.
    (Deliberately no card class: panels are styled where they are used.) */
 @utility btn {
-  @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60;
+  @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-(--dur-base) disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 /* Primary is near-black ink: one per screen. Press feedback is a 1px drop, transform only. */
@@ -82,7 +82,7 @@
 }
 
 @utility input-field {
-  @apply min-h-11 rounded-md border border-control bg-surface px-3 py-2 text-sm text-fg transition-colors duration-150 placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60;
+  @apply min-h-11 rounded-md border border-control bg-surface px-3 py-2 text-sm text-fg transition-colors duration-(--dur-base) placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 @utility data-table {
@@ -91,13 +91,76 @@
 
 /* Status pill: dot + word, so colour never carries meaning alone. */
 @utility pill {
-  @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold;
+  @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold transition-colors duration-(--dur-base);
 }
 
 /* UNKNOWN state: a dashed outline and a hollow dashed dot, never a fill.
    WHY: replaces the diagonal hatch, which tiled across every stale row and read as texture, not signal. */
 @utility pill-unknown {
   @apply pill border border-dashed border-unknown bg-surface text-muted;
+}
+
+/* Motion tokens (shared contract). Entrances use --ease-out; on-screen movement --ease-in-out;
+   hover/colour transitions keep Tailwind's default `ease`. Nothing runs longer than 260 ms. */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+}
+
+/* One-shot appearances (keyframes only here; rapidly retriggered feedback uses transitions above).
+   `both` fill so an element never flashes before its animation starts. */
+@keyframes anim-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes anim-rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes anim-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes anim-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.anim-fade-in { animation: anim-fade-in var(--dur-base) var(--ease-out) both; }
+/* WHY: inline messages (errors, notices): the 6px rise reads as "new information arriving". */
+.anim-rise-in { animation: anim-rise-in var(--dur-base) var(--ease-out) both; }
+/* WHY: menus/popovers grow from their trigger: set `--origin` (e.g. top left) per call site. */
+.anim-pop-in { animation: anim-pop-in var(--dur-fast) var(--ease-out) both; transform-origin: var(--origin, center); }
+.anim-shake { animation: anim-shake 320ms ease-out both; }
+/* WHY: `backwards`, not `both` — a retained transform would make this wrapper a containing block for fixed descendants. */
+.page-enter { animation: page-enter var(--dur-base) var(--ease-out) backwards; }
+
+/* <details> disclosure (admin users/gates): size + content-visibility animate only where the
+   browser can interpolate `auto`; elsewhere disclosures simply open instantly. */
+@supports (interpolate-size: allow-keywords) {
+  :root {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size var(--dur-base) var(--ease-out),
+      content-visibility var(--dur-base) allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+  }
 }
 
 /* Light scrollbar */
@@ -169,14 +232,35 @@
   color: #ffffff;
 }
 
-/* Honour the user's motion setting: stop animations and transitions. */
+/* Honour the user's motion setting, gently: transform-based movement (rise, pop, shake, page enter)
+   is removed and the one-shot appearances fall back to a short opacity fade; colour/opacity
+   transitions stay, capped at the fast duration. Spinners keep spinning (they communicate loading);
+   nothing else loops. */
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .anim-shake {
+    animation: none;
+  }
+  .page-enter,
+  .anim-rise-in,
+  .anim-pop-in {
+    animation: anim-fade-in var(--dur-fast) var(--ease-out) both;
+  }
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    transition-duration: var(--dur-fast) !important;
+    animation-duration: var(--dur-fast) !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+  /* block-size is neither opacity nor colour: disclosures open instantly. */
+  details::details-content {
+    transition: none;
   }
 }

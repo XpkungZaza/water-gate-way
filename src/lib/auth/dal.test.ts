@@ -46,6 +46,7 @@ vi.mock("next/headers", () => {
   return {
     cookies: async () => ({
       get: (name: string) => (h.cookieJar.has(name) ? { name, value: h.cookieJar.get(name) } : undefined),
+      has: (name: string) => h.cookieJar.has(name),
       set: h.set,
       delete: h.del,
     }),
@@ -109,6 +110,11 @@ describe("requirePageUser", () => {
     await expect(requirePageUser("/dashboard?gate=gate-2")).rejects.toThrow("NEXT_REDIRECT");
     expect(redirect).toHaveBeenCalledWith("/login?next=%2Fdashboard%3Fgate%3Dgate-2");
   });
+  it("no session but a remember cookie -> redirect to the restore endpoint", async () => {
+    h.cookieJar.set("wg_remember", "x.y");
+    await expect(requirePageUser("/dashboard?gate=gate-2")).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/api/auth/restore?next=%2Fdashboard%3Fgate%3Dgate-2");
+  });
   it("session -> returns the user, no redirect", async () => {
     await loginAs("u-viewer");
     await expect(requirePageUser("/")).resolves.toMatchObject({ id: "u-viewer", role: "viewer" });
@@ -120,6 +126,11 @@ describe("requireAdminPage", () => {
   it("no session -> redirect to /login with the encoded next path", async () => {
     await expect(requireAdminPage("/admin/users")).rejects.toThrow("NEXT_REDIRECT");
     expect(redirect).toHaveBeenCalledWith("/login?next=%2Fadmin%2Fusers");
+  });
+  it("no session but a remember cookie -> redirect to the restore endpoint", async () => {
+    h.cookieJar.set("wg_remember", "x.y");
+    await expect(requireAdminPage("/admin/users")).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/api/auth/restore?next=%2Fadmin%2Fusers");
   });
   it("logged-in viewer -> notFound, not a redirect (the page must not reveal it exists)", async () => {
     await loginAs("u-viewer");
