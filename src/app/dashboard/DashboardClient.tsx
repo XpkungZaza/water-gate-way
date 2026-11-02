@@ -91,7 +91,7 @@ function LiveDashboard({ gate, role }: Props) {
         {/* Viewer gets the same panel read-only: state is job #1 for every role. */}
         <aside className="min-w-0 lg:col-start-2 lg:row-span-3 lg:row-start-1">
           <div className="lg:sticky lg:top-6">
-            <ControlPanel devices={status?.devices ?? null} stale={stale} readOnly={role === "viewer"} />
+            <ControlPanel devices={status?.devices ?? null} mode={status?.mode ?? null} stale={stale} readOnly={role === "viewer"} />
           </div>
         </aside>
 

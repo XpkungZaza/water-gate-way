@@ -1,4 +1,7 @@
+export type GateMode = "AUTO" | "MANUAL" | "OFF";
+
 export type GateStatus = {
+  mode: GateMode | null;
   pzem: { voltage: number | null; current: number | null; frequency: number | null; power: number | null };
   radar: { liquid: number | null; airGap: number | null };
   float: Record<string, boolean>;
@@ -32,6 +35,11 @@ function bool(v: unknown): boolean | null {
   return null;
 }
 
+function mode(v: unknown): GateMode | null {
+  const m = typeof v === "string" ? v.trim().toUpperCase() : "";
+  return m === "AUTO" || m === "MANUAL" || m === "OFF" ? m : null;
+}
+
 /** First non-null of the candidates, so a 0 reading wins over a later fallback. */
 function first<T>(...vals: (T | null)[]): T | null {
   for (const v of vals) if (v !== null) return v;
@@ -48,6 +56,7 @@ export function parseStatus(payload: unknown, now: Date): GateStatus | null {
 
   const a = isObj(payload.stm32) ? payload.stm32 : null;
   const out: GateStatus = {
+    mode: null,
     pzem: { voltage: null, current: null, frequency: null, power: null },
     radar: { liquid: null, airGap: null },
     float: {},
@@ -97,8 +106,16 @@ export function parseStatus(payload: unknown, now: Date): GateStatus | null {
 
     const wb = obj(payload.wirebreak);
     out.wireBreak = { red: bool(wb.wb1), blue: bool(wb.wb2) };
-    out.devices.pump = bool(payload.pump);
-    out.devices.alarm = bool(payload.alarm);
+    out.mode = mode(payload.mode);
+    if (isObj(payload.pump)) {
+      // Real payload: pump is an object of contact states; web keys map pc0→pump, pc1→relay1, pc2→relay2.
+      out.devices.pump = bool(payload.pump.pc0);
+      out.devices.relay1 = bool(payload.pump.pc1);
+      out.devices.relay2 = bool(payload.pump.pc2);
+    } else {
+      out.devices.pump = bool(payload.pump);
+    }
+    out.devices.alarm = isObj(payload.alarm) ? bool(payload.alarm.state) : bool(payload.alarm);
   }
 
   return out;

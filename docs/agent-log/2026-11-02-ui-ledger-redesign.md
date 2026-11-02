@@ -234,3 +234,67 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   high). Smoke on :3100 passed; MSE code present in the client bundle; droplet → go2rtc frame 200. Leo restarted
   at 10:56:31 UTC; process cwd releases/20261102-73cbd6c; www.hyxc.io routes as expected; 0 error lines.
   Not verified: live playback on prod with a real session (needs Leo's account), Safari/iOS.
+
+## [--:--] Chart does not show, "auto" state, new icons (Leo; work given to opencode)
+- **Chart root cause (evidence, read-only on prod):** `public.water_levels` has **0 rows**. The app's own query
+  (`select ... from water_levels order by measured_at desc limit 24`, run with `search_path=wgw,public`) resolves to
+  `public.water_levels`, has the right columns and returns 0 rows without error, so the dashboard shows its empty
+  state ("ยังไม่มีข้อมูลระดับน้ำที่บันทึกไว้") instead of a line. Nothing writes the table: the only writer is
+  `mqtt_bridge.js`, which is not in the release directory, no bridge unit exists on the droplet (only
+  `mosquitto` and `water-gate`), and the Pi runs its own stm32 nodes (serial_bridge, status_node, dashboard_rx/tx,
+  cmd_node, trace_node), none of which touch Postgres. Live payload has `radar.liquid` (2.236 m), so the bridge
+  would insert once the Pi's `stm32/status/all` reaches it (throttle 60 s).
+- **Fix chosen (no new code): deploy the existing bridge** as a systemd unit next to `water-gate`.
+  Rejected: inserting from the Next.js server (its broker connection starts lazily on the first SSE client or command,
+  so nothing would be recorded while nobody has the dashboard open; fixing that needs `instrumentation.ts`).
+  Needs Leo: sudo (unit) and the broker login for the bridge (a credential file, a Hard Stop, not created by me).
+- **"Auto" state (live, from the Pi trace log):** the system is in **MANUAL** now (`stm32/status/all` `"mode":"MANUAL"`,
+  `tank/mode "MANUAL"`). The Pi has AUTO(0)/MANUAL(1)/OFF(2). The web has no auto button and `parseStatus` ignores
+  `mode`. The web's M1/M0 are not a mode switch on the new Pi pipeline: `protocol.py` maps M→master 1 (m1),
+  Q→master 2, P→pump 1, R→pump 2.
+- **Second bug found while comparing the live payload with the parser:** real `pump` is `{pc0,pc1,pc2,pc3}` (pc0=p1,
+  pc1=p2, pc2=m2, pc3=m1) and `alarm` is `{state}`; `parseStatus` does `bool(payload.pump)` and `bool(payload.alarm)`,
+  which are null for objects, so pump, relays and alarm are always "ไม่ทราบสถานะ" on the live system. The old
+  fixtures were "derived from the code, not captured from a live broker".
+- **Not fixed, reported:** `pzem.p` is absent at the top level (power is in `phases[].p`), so กำลังไฟ shows "—";
+  `person_count` is absent in this format, so the detection card is unknown; `wirebreak` in the Pi payload is
+  hard-coded false in `to_dashboard_dict`.
+- **opencode:** `zai/glm-5.3-flashx` is refused ("subscription plan does not yet include access"); the same
+  family `zai/glm-5.3-flash` works and was used, in an isolated git worktree (a previous opencode run rewrote
+  unrelated files). `opencode/glm-5.3-flash-free` was not used (different provider, different data terms).
+- **Icons:** `src/app/favicon.ico` (16/32/48, replaces the default), `src/app/icon.png` (192), `src/app/apple-icon.png`
+  (180), `public/logo-mark.png` (header mark), `public/logo.png` (wordmark on login/register). Generated from the two
+  logos with ImageMagick; first attempt cropped the mark because I hard-coded a 900 px extent for a 1197 px trim
+  box: always derive the extent from the trimmed size. The mark uses indigo `#1f1478`, which the house style bans
+  (no violet/indigo); kept because it is the owner's brand asset.
+- **Delegation result (opencode `zai/glm-5.3-flash`, isolated worktree, reviewed line by line before applying):**
+  parseStatus now reads `mode`, `pump.pc0/pc1/pc2` and `alarm.state`; `modeView.ts` (+test); a `โหมด` row in
+  ControlPanel (viewer sees it too; no way to change the mode). Red first (9 failing), then 333/333. The `LIVE_B`
+  fixture was compared with the captured JSON: identical. Only allowed files changed. The patch was applied to the
+  main tree; the worktree and scratch branch were removed.
+- **Bug I introduced and fixed:** `proxy.ts` matcher only exempted `favicon.ico`, so `/icon.png`, `/apple-icon.png`,
+  `/logo-mark.png`, `/logo.png` answered 307 to /login for logged-out visitors (broken wordmark on the login page,
+  no apple-touch-icon). Added them to the matcher; verified logged-out 200 for the five assets, and 307/401 for
+  /dashboard, /admin, /api/water-level.
+- **Rig result (live-shaped payload through the local broker):** mode row "ควบคุมเอง" (MANUAL); ปั๊มหลัก/สัญญาณเตือน/
+  ปั๊ม IoT 1 "ปิดอยู่", ปั๊ม IoT 2 "ทำงาน" (pc2 true), ไฟ "ไม่ทราบสถานะ" (no source). After the feed stopped for
+  >30 s: "ไม่ทราบโหมด", devices unknown, title "ขาดการเชื่อมต่อ ... รายงานล่าสุด <time of last frame>".
+- **Bridge runbook (not done; needs Leo: sudo + a credential file, a Hard Stop):**
+  1. ship `mqtt_bridge.js` into the live release dir (next to `node_modules`, which has `mqtt` and `pg`):
+     `scp mqtt_bridge.js cmmc@<droplet>:~/wgw/releases/<REL>/` (add it to the rsync list of future releases).
+  2. `~/wgw/bridge.env`, mode 600, from `app.env` WITHOUT `PGOPTIONS` (with `search_path=wgw,public` the bridge's
+     `CREATE TABLE IF NOT EXISTS water_levels` would create `wgw.water_levels` and shadow the existing one):
+     PGUSER/PGHOST/PGDATABASE/PGPASSWORD/PGPORT, `MQTT_BROKER=<MQTT_URL>`, `MQTT_USER=<MQTT_USERNAME>`,
+     `MQTT_PASS=<MQTT_PASSWORD>`, `MQTT_TOPIC=stm32/status/all`, `STATUS_SAMPLE_SEC=300`.
+     Assumes the `nextjs` broker login may read `stm32/status/all` (the ACL file is not readable by cmmc: unverified).
+  3. unit `/etc/systemd/system/mqtt-bridge.service` (User=cmmc, WorkingDirectory=~/wgw/current,
+     EnvironmentFile=~/wgw/bridge.env, ExecStart=/usr/bin/node ~/wgw/current/mqtt_bridge.js, Restart=always),
+     then `systemctl daemon-reload && systemctl enable --now mqtt-bridge`.
+  4. verify: `journalctl -u mqtt-bridge` shows "Subscribed" and "[DB] Inserted row"; `select count(*), max(measured_at)
+     from water_levels` grows; the chart draws a line from the 2nd row on (one point draws nothing: no dots).
+  Note: the API returns the last 24 ROWS, so with 300 s sampling the chart covers 2 hours, not 24 hours; a real
+  24 h view needs a time-based query (not built).
+- **Lesson:** 📌 GENERAL: when a request names a model your plan does not include, probe the nearest model of the
+  same provider with a trivial prompt (no code) before choosing a substitute, and say so. 📌 GENERAL: `pgrep -f
+  <pattern>` inside a command that contains the pattern matches itself; wait on a PID or a log line instead.
+  📌 GENERAL: adding public static assets to an auth-gating proxy means adding them to its matcher.

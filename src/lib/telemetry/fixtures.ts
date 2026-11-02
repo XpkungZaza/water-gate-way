@@ -25,3 +25,25 @@ export const FORMAT_B = {
   pump: true,
   alarm: true,
 };
+
+/** LIVE_B was captured from the live broker (topic stm32/status/all), 2026-11-02. */
+export const LIVE_B = {
+  mode: "MANUAL",
+  pzem: {
+    v: 225.5,
+    i: 0.0,
+    freq: 49.93,
+    phases: [
+      { v: 225.5, i: 0.0, p: 0.0, e: 0.0 },
+      { v: 0.0, i: 0.0, p: 0.0, e: 0.0 },
+      { v: 0.0, i: 0.0, p: 0.0, e: 0.0 },
+    ],
+  },
+  radar: { air: 0.764, liquid: 2.236 },
+  float: { f1: false, f2: false, f3: false },
+  wirebreak: { wb1: false, wb2: false },
+  pump: { pc0: false, pc1: false, pc2: true, pc3: true },
+  alarm: { state: false },
+  ai: { detect: false },
+  timestamp: "2026-11-02T11:30:02.941482+00:00",
+} as const;

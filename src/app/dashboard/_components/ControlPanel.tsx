@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { Bell, CircleAlert, Fan, Lightbulb, Power } from "lucide-react";
 import type { Command } from "@/lib/control/commands";
-import type { GateStatus } from "@/lib/telemetry/parseStatus";
+import type { GateMode, GateStatus } from "@/lib/telemetry/parseStatus";
 import DeviceSwitch, { type SwitchStatus } from "@/components/DeviceSwitch";
+import StatePill from "@/components/StatePill";
+import { modeView } from "./modeView";
 
 type Devices = GateStatus["devices"];
 type DeviceKey = keyof Devices;
@@ -41,6 +43,7 @@ type Note = { key: DeviceKey; target: boolean; cmd: Command; phase: "waiting" | 
 
 type Props = {
   devices: Devices | null;
+  mode: GateMode | null;
   stale: boolean;
   /** Viewer mode: the same panel and state readouts, no command buttons, notes or fetch. */
   readOnly?: boolean;
@@ -49,7 +52,7 @@ type Props = {
 /** Operator/admin sends commands (server enforces it too: POST /api/control requires "operator").
  *  WHY: buttons stay enabled when stale; the server is authoritative and an operator may need to
  *  act during an outage. */
-export default function ControlPanel({ devices, stale, readOnly = false }: Props) {
+export default function ControlPanel({ devices, mode, stale, readOnly = false }: Props) {
   const [sending, setSending] = useState<Command | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
@@ -116,6 +119,8 @@ export default function ControlPanel({ devices, stale, readOnly = false }: Props
     return null;
   };
 
+  const mv = modeView(mode, stale);
+
   return (
     <section aria-labelledby="controls-heading" className="rounded-lg border border-border bg-surface">
       <header className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
@@ -126,6 +131,11 @@ export default function ControlPanel({ devices, stale, readOnly = false }: Props
             means for these switches, instead of a second banner. */}
         {stale && <span className="text-sm text-muted">สถานะอาจไม่ตรงความจริง</span>}
       </header>
+
+      <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
+        <span className="text-sm text-muted">โหมด</span>
+        <StatePill tone={mv.tone}>{mv.label}</StatePill>
+      </div>
 
       {!readOnly && error && (
         <div
