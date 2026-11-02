@@ -179,3 +179,53 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
 - **Not verified:** a real GitHub run (needs the push).
 - **Lesson:** 📌 GENERAL: pin third-party actions to a commit SHA, not a tag; and test the CI steps in a container
   with the runner's OS and Node before the first push.
+
+## [--:--] Debug: control rate limit (Haiku) + camera real-time (Pi online)
+- **Rate limit (Haiku, reviewed):** repro test showed 10 presses then a 429 with Retry-After 50 s. Root cause
+  `rateLimit.ts` `controlByUser {limit: 10, windowMs: 60_000}`, a fixed window (lockout up to 60 s). Changed to
+  `{limit: 1, windowMs: 1_000}`; tests red then green (route.test.ts, guards.test.ts); 325/325, tsc, lint OK.
+  Safety: 1/s lets a pump relay be toggled every second (short-cycling); a per-device minimum interval was
+  proposed, not built (N is a hardware decision). Note: the "x-real-ip fallback" test now sends a second POST that
+  is 429; it still passes because it only checks audit IPs. Not committed.
+- **Camera numbers (Pi go2rtc over tailnet, office1..3 = Tapo stream2, H.264 640x360, ~15 fps, keyframe every 2 s):**
+  frame.jpeg 0.9–1.9 s behind the OSD clock (1.3–3.9 s to answer, waits for a keyframe); raw stream.mp4 read by
+  ffmpeg ~1 s behind.
+- **Bug found (reliable repro, Chrome Dev headless and the app pane):** the dashboard players never start.
+  `<video autoPlay src=stream.mp4>` buffers ~3.2 s, stays `readyState 3`, `paused`, and the player reconnects every
+  ~15 s (CONNECT_TIMEOUT_MS, `playing` never fires). Root cause: autoplay waits for HAVE_ENOUGH_DATA, which a live
+  progressive MP4 (duration = buffered end) never reaches, and Chrome stops downloading a paused element at ~3 s.
+  Disproof run: a manual `play()` starts all three at once. A forced live-edge start then hits `ended` (duration =
+  buffer end) and the player's onEnded reconnects. Camera-MSE log of 2026-10-30 said "Not verified: playback in a
+  browser".
+- **Prototype (in the measuring browser only, app unchanged):** MSE fed by `fetch()` of the same
+  `/api/camera/stream` route, `duration = Infinity`, keep the playhead ~0.3 s from the buffer end: plays
+  continuously, ~0.8 s buffered, OSD 1.4–2.4 s behind wall clock (Mac → tailnet → Pi). Prod adds the droplet hop
+  and Cloudflare.
+- **Dead end (mine):** my rig cookie proxy did not close the upstream request when the client left
+  (`r.pipe(res)` without `res.on("close")`), so the app kept stream slots and answered 429 `too_many_streams` /
+  `camera_busy` with no viewer connected. Fixed in the proxy; the app itself frees slots on disconnect (8/8
+  open-and-drop runs, direct and via proxy, all 200, 0 upstream connections left).
+- **Lessons:** 📌 GENERAL: `autoplay` on a live progressive stream may never fire; start playback yourself on
+  `loadeddata`, or use MSE with an infinite duration. 📌 GENERAL: a test proxy must forward client disconnects, or
+  it manufactures resource leaks that look like app bugs. 📌 GENERAL: a ±1 s OSD clock in frame is a cheap
+  glass-to-glass meter.
+
+## [--:--] Camera player rewritten on MSE (approved by Leo)
+- **Action:** `src/components/Go2RTCPlayer.tsx` FULL REWRITE: `fetch()` of the same `/api/camera/stream` route →
+  MediaSource (ManagedMediaSource on iOS Safari 17.1+), `sb.mode = "segments"`, `duration = Infinity`, playhead
+  kept near the live edge, old media trimmed; progressive fallback starts playback explicitly on `loadeddata`.
+  New pure `src/components/liveEdge.ts` (+7 tests, red first): seek to end−0.3 s when outside the buffer or more than
+  1.5 s behind; trim to the last 10 s once the buffer exceeds 12 s. Removed `liveLag.ts` (+13 tests): its
+  wall-clock lag model only existed for the progressive pipe. Retries now never stop: backoff 2→30 s, "ออฟไลน์"
+  after 3 failures with a retry-now button; the connect timeout also covers background retries.
+- **Measured (headless Chrome Dev, rig → tailnet → Pi):** all three tiles "สด" for 30 s, ~0.5 s buffered,
+  OSD 0.6–1.9 s behind wall clock (raw stream floor ~1 s). Network drop (proxy `kill -9` for 5 s): tiles go to
+  "กำลังเชื่อมต่อ" within 1 s and are live again 2 s after the path returns. No upstream connection left after
+  the browser closes.
+- **Breadcrumb not explained:** with the server process killed (SIGTERM, then SIGKILL) playback in the earlier
+  runs continued without a gap; the process topology of `next start` behind my proxy was not resolved. Recorded,
+  not used as evidence; the proxy-drop test was used instead because its outcome is unambiguous.
+- **Gate:** vitest 319/319, tsc, eslint 0 errors (a 4th `location.assign` warning, the same 401 → login pattern),
+  build OK. Not verified: Safari / iOS (ManagedMediaSource path), prod path through droplet + Cloudflare.
+- **Lesson:** 📌 GENERAL: a monitoring view must retry forever with backoff; "give up after N" turns a 5-second
+  outage into a dead screen until a human clicks.
