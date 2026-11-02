@@ -31,11 +31,11 @@ describe("rate limiter", () => {
     };
     expect(n(loginByIp, 0)).toBe(20);
     expect(n(loginByEmail, 0)).toBe(5);
-    expect(n(controlByUser, 0)).toBe(10);
+    expect(n(controlByUser, 0)).toBe(1);
     const r = loginByEmail.hit("same", 0);
     if (!r.ok) expect(r.retryAfterSec).toBe(900);
     const c = controlByUser.hit("same", 0);
-    if (!c.ok) expect(c.retryAfterSec).toBe(60);
+    if (!c.ok) expect(c.retryAfterSec).toBe(1);
   });
 });
 

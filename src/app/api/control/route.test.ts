@@ -131,16 +131,37 @@ describe("POST /api/control", () => {
     spy.mockRestore();
   });
 
-  it("11th command in a minute is 429", async () => {
-    for (let i = 0; i < 10; i++) expect((await POST(req({ command: "P1" }) as never)).status).toBe(200);
-    const res = await POST(req({ command: "P1" }) as never);
-    expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: "rate_limited" });
-    const ra = Number(res.headers.get("retry-after"));
-    expect(ra).toBeGreaterThanOrEqual(1);
-    expect(ra).toBeLessThanOrEqual(60);
-    expect(forwardCommand).toHaveBeenCalledTimes(10);
-    expect(audits().at(-1)).toEqual([h.user!.id, "P1", "rate_limited", "203.0.113.9"]);
+  it("second command within the same second is 429, Retry-After 1, audit rate_limited", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const t0 = Date.parse("2026-01-01T00:00:00Z");
+      vi.setSystemTime(t0);
+      expect((await POST(req({ command: "P1" }) as never)).status).toBe(200);
+      vi.setSystemTime(t0 + 500);
+      const res = await POST(req({ command: "P1" }) as never);
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "rate_limited" });
+      expect(res.headers.get("retry-after")).toBe("1");
+      expect(forwardCommand).toHaveBeenCalledTimes(1);
+      expect(audits().at(-1)).toEqual([h.user!.id, "P1", "rate_limited", "203.0.113.9"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Operator pattern: one press per second for 11 presses. Must never hit the limiter.
+  it("11 commands one second apart all pass (1 command per second per user)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const t0 = Date.parse("2026-01-01T00:00:00Z");
+      for (let i = 0; i < 11; i++) {
+        vi.setSystemTime(t0 + i * 1000);
+        expect((await POST(req({ command: "P1" }) as never)).status).toBe(200);
+      }
+      expect(forwardCommand).toHaveBeenCalledTimes(11);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("invalid commands do not consume the rate limit", async () => {
