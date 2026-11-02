@@ -29,3 +29,7 @@ export function createRateLimiter(opts: { limit: number; windowMs: number }) {
 export const loginByIp = createRateLimiter({ limit: 20, windowMs: 15 * 60_000 });
 export const loginByEmail = createRateLimiter({ limit: 5, windowMs: 15 * 60_000 });
 export const controlByUser = createRateLimiter({ limit: 10, windowMs: 60_000 });
+// WHY: sign-up is unauthenticated and every attempt runs a 128 MiB scrypt; the global bucket bounds total
+// memory/CPU even when an attacker rotates IPs, the per-IP one stops a single client filling the users table.
+export const registerByIp = createRateLimiter({ limit: 5, windowMs: 60 * 60_000 });
+export const registerGlobal = createRateLimiter({ limit: 50, windowMs: 60 * 60_000 });
