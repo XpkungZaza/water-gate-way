@@ -2,6 +2,7 @@
 
 // FULL REWRITE: progressive <video src> replaced by MSE fed from the same authenticated route.
 import { useEffect, useRef, useState } from "react";
+import { useRedirectToLogin } from "@/hooks/useRedirectToLogin";
 import { liveEdgeAction } from "./liveEdge";
 
 interface Go2RTCPlayerProps {
@@ -73,8 +74,9 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
     }, delay);
   };
   // WHY: effects below capture these by closure; a ref keeps them current without re-running the stream effect.
-  const actions = useRef({ fail, reconnect });
-  actions.current = { fail, reconnect };
+  const redirectToLogin = useRedirectToLogin();
+  const actions = useRef({ fail, reconnect, redirectToLogin });
+  actions.current = { fail, reconnect, redirectToLogin };
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -120,7 +122,7 @@ export default function Go2RTCPlayer({ streamName, label }: Go2RTCPlayerProps) {
     const run = async () => {
       const res = await fetch(src, { cache: "no-store", signal: abort.signal });
       if (res.status === 401) {
-        window.location.assign("/login?next=" + encodeURIComponent(location.pathname + location.search));
+        actions.current.redirectToLogin();
         return;
       }
       const type = res.headers.get("content-type") ?? "";

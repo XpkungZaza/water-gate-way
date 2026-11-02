@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { GateStatus } from "@/lib/telemetry/parseStatus";
+import { useRedirectToLogin } from "./useRedirectToLogin";
 
 export type GateConn = "connecting" | "connected" | "disconnected";
 
@@ -12,6 +13,8 @@ const RETRY_MS = 5_000;
 export function useGateStatus(): { status: GateStatus | null; conn: GateConn } {
   const [status, setStatus] = useState<GateStatus | null>(null);
   const [conn, setConn] = useState<GateConn>("connecting");
+
+  const redirectToLogin = useRedirectToLogin();
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -44,7 +47,7 @@ export function useGateStatus(): { status: GateStatus | null; conn: GateConn } {
             if (disposed) return;
             if (unauthorized) {
               es?.close();
-              window.location.assign("/login?next=" + encodeURIComponent(location.pathname + location.search));
+              redirectToLogin();
               return;
             }
             // WHY: a non-200 response (e.g. 503) closes EventSource for good; reopen it ourselves.
@@ -64,7 +67,7 @@ export function useGateStatus(): { status: GateStatus | null; conn: GateConn } {
       if (retry) clearTimeout(retry);
       es?.close();
     };
-  }, []);
+  }, [redirectToLogin]);
 
   return { status, conn };
 }

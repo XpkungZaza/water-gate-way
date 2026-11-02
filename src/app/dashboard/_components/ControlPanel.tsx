@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, CircleAlert, Fan, Lightbulb, Power } from "lucide-react";
+import { useRedirectToLogin } from "@/hooks/useRedirectToLogin";
 import type { Command } from "@/lib/control/commands";
 import type { GateMode, GateStatus } from "@/lib/telemetry/parseStatus";
 import DeviceSwitch, { type SwitchStatus } from "@/components/DeviceSwitch";
@@ -56,6 +57,7 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
   const [sending, setSending] = useState<Command | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
+  const redirectToLogin = useRedirectToLogin();
 
   async function sendCommand(cmd: Command) {
     if (sending) return;
@@ -68,7 +70,7 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
         body: JSON.stringify({ command: cmd }),
       });
       if (res.status === 401) {
-        window.location.assign("/login?next=" + encodeURIComponent(location.pathname + location.search));
+        redirectToLogin();
         return;
       }
       if (!res.ok) setError(errorText(res));

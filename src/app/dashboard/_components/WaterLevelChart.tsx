@@ -13,6 +13,7 @@ import {
   type TooltipValueType,
 } from "recharts";
 import { Download } from "lucide-react";
+import { useRedirectToLogin } from "@/hooks/useRedirectToLogin";
 import { LEVEL_DANGER_M, LEVEL_MAX_M, LEVEL_WARN_M } from "./levels";
 
 // WHY: Recharts takes SVG attributes, which cannot read CSS variables; these mirror the @theme tokens in globals.css.
@@ -67,12 +68,13 @@ export default function WaterLevelChart() {
   const [data, setData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const redirectToLogin = useRedirectToLogin();
 
   const fetchWaterLevels = useCallback(async () => {
     try {
       const res = await fetch("/api/water-level", { cache: "no-store" });
       if (res.status === 401) {
-        window.location.assign("/login?next=" + encodeURIComponent(location.pathname + location.search));
+        redirectToLogin();
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -88,7 +90,7 @@ export default function WaterLevelChart() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [redirectToLogin]);
 
   useEffect(() => {
     // WHY: the first load awaits the network before any setState, so this is not a synchronous update.
