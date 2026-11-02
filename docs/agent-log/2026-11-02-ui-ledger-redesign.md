@@ -298,3 +298,11 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   same provider with a trivial prompt (no code) before choosing a substitute, and say so. 📌 GENERAL: `pgrep -f
   <pattern>` inside a command that contains the pattern matches itself; wait on a PID or a log line instead.
   📌 GENERAL: adding public static assets to an auth-gating proxy means adding them to its matcher.
+- **Deploy 0658fb5 (logo + parser/mode):** deps unchanged, node_modules hard-linked from 20261102-73cbd6c; this
+  release also ships `public/` (the logos). Clean build 333 tests / tsc / lint 0 errors / audit 0 high; smoke on :3100
+  passed. Leo ran the restart; the unit sat in `deactivating` for ~80 s (11:51:25 to 11:52:52 UTC) before the new
+  process came up from releases/20261102-0658fb5. Verified on www.hyxc.io: /login and /register 200, all five brand
+  images 200 without a session, /dashboard 307, /api/control 401, /_next/image 404, 0 error lines.
+  The slow stop is probably the default 90 s stop timeout waiting on long-lived SSE/camera connections (not
+  verified: the journal is not readable for cmmc); fix idea: `TimeoutStopSec=15` in the unit.
+  Not verified on prod: the mode row with a real session (needs Leo's account); the chart is still empty (no bridge).
