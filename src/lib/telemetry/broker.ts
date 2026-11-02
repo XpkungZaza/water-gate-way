@@ -1,6 +1,7 @@
 import "server-only";
 import { connect, type MqttClient } from "mqtt";
 import { parseStatus, type GateStatus } from "./parseStatus";
+import { recordLevel } from "./recordLevel";
 
 export type ConnState = "connected" | "disconnected";
 export type StatusEvent = { type: "status"; status: GateStatus } | { type: "conn"; state: ConnState };
@@ -88,8 +89,14 @@ function start(s: State) {
     }
     if (!status) return warnBadPayload(s, topic);
     s.last = status;
+    void recordLevel(status);
     emit(s, { type: "status", status });
   });
+}
+
+// WHY: the connection must start at server boot, not on the first visitor, or nothing is recorded while nobody has the dashboard open.
+export function startTelemetry(): void {
+  state();
 }
 
 function state(): State {

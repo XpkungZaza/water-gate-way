@@ -6,6 +6,8 @@ const h = vi.hoisted(() => ({
   clients: [] as Array<import("node:events").EventEmitter & { subscribe: ReturnType<typeof vi.fn>; url: string; opts: Record<string, unknown> }>,
 }));
 
+vi.mock("./recordLevel", () => ({ recordLevel: vi.fn(async () => {}) }));
+
 vi.mock("mqtt", () => ({
   connect: vi.fn((url: string, opts: Record<string, unknown>) => {
     const c = Object.assign(new EventEmitter(), { subscribe: vi.fn(), url, opts });
@@ -34,6 +36,7 @@ vi.mock("@/lib/auth/dal", async () => {
 });
 
 import { subscribeStatus, type StatusEvent } from "./broker";
+import { recordLevel } from "./recordLevel";
 import { GET, HEAD } from "@/app/api/status/stream/route";
 import { requireUser } from "@/lib/auth/dal";
 
@@ -112,6 +115,8 @@ describe("broker", () => {
     const st = got.filter((e) => e.type === "status");
     expect(st).toHaveLength(1);
     expect(st[0].type === "status" && st[0].status.pzem.voltage).toBe(230);
+    // the parsed status also goes to the level recorder
+    expect(recordLevel).toHaveBeenCalledExactlyOnceWith(st[0].type === "status" ? st[0].status : null);
   });
 
   it("invalid JSON and non-object payload -> no event, no payload echo in logs", () => {

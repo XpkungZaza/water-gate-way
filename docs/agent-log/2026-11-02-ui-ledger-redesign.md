@@ -306,3 +306,40 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   The slow stop is probably the default 90 s stop timeout waiting on long-lived SSE/camera connections (not
   verified: the journal is not readable for cmmc); fix idea: `TimeoutStopSec=15` in the unit.
   Not verified on prod: the mode row with a real session (needs Leo's account); the chart is still empty (no bridge).
+
+## [--:--] Graph still empty + 4 CI warnings (Leo: "GLM does all, I review, then CI/CD")
+- **Split:** opencode `zai/glm-5.3-flash` ran twice in parallel, in two isolated worktrees, with a file allow-list each; I
+  gave it the facts I had measured and did all production access myself (no external model drives a production host).
+  Both diffs were read line by line before applying; both stayed inside the allow-list.
+- **Warnings (A):** `@next/next/no-location-assign-relative-destination` x4 (useGateStatus, Go2RTCPlayer,
+  WaterLevelChart, ControlPanel). The rule only inspects static strings, so wrapping `location.assign` in a helper
+  would silence it without fixing anything; the rule's advice is `useRouter()`, which was done: `loginUrl()` (pure,
+  tested), `useRedirectToLogin()` (`router.replace`, so the expired page leaves no history entry). Lint: 0 problems.
+  Risk checked on purpose: the new hook sits in effect dependency arrays, so an unstable `useRouter()` would reconnect
+  the EventSource on every status. Measured in headless Chrome over 30 s with ~15 status messages: `EventSource`
+  constructed once, chart fetched once. 401 path (session deleted while the page was open, then a command pressed):
+  client-side navigation to `/login?next=%2Fdashboard`, same document, no reload.
+- **Graph (B), root cause as before (prod `water_levels` = 0 rows, nothing writes it), now fixed in the app:**
+  `src/lib/telemetry/recordLevel.ts` stores `radar.liquid` at most once per `WATER_LEVEL_SAMPLE_SEC` (default 300 s,
+  time taken from `receivedAt`, window claimed before the await, errors logged without payload, never thrown);
+  `broker.ts` calls it for every parsed status; `src/instrumentation.ts` starts the MQTT subscription at server boot
+  (`register()`, nodejs runtime) because the old lazy start only began on the first dashboard visitor, so nothing
+  would be recorded while nobody watches. Chosen over deploying `mqtt_bridge.js` because it needs no sudo, no extra
+  unit and no extra credential file; the bridge must NOT run against the same database at the same time.
+  The build does not call `register` (no MQTT lines in the build log).
+- **Rig proof of the root cause and the fix:** `water_levels` emptied (like prod), server started with
+  `WATER_LEVEL_SAMPLE_SEC=5`, no browser opened and no request made: 3 rows within ~12 s (2.236 m). Opening the
+  dashboard then draws the line. Gate: vitest 354/354, tsc, eslint 0 problems.
+- **Prod facts checked before deploying (read-only):** the Pi's six nodes hold six TCP connections to the droplet
+  broker, so telemetry reaches the app and the recorder will have data right after the restart.
+- **Observation, not acted on:** the droplet broker still listens on 0.0.0.0 for 1883, 8883 and 9001, and one
+  established connection came from a public Thai address (not identified: may be Leo's own device).
+  The 2026-10-31 notes called an anonymous public broker a P0; whether anonymous access is still allowed was NOT
+  tested (an outbound probe to the production broker needs Leo's go-ahead). The Pi publishes to the broker's public
+  IP (`MQTT_HOST` default) instead of the tailnet address.
+- **Chart semantics:** it shows the last 24 rows, so at 300 s sampling that is the last 2 hours (title says "24 ค่าล่าสุด").
+- **Lessons:** 📌 GENERAL: a lint rule that inspects static strings is satisfied by indirection; fix the behaviour
+  the rule protects, not the pattern it matches. 📌 GENERAL: when a hook's callback goes into an effect's dependency
+  array, test that it is stable by counting side effects (connections), not by reading the library docs.
+  📌 GENERAL: a background subscriber that starts on the first request records nothing while nobody is looking;
+  start it at process boot (Next `instrumentation.ts`).

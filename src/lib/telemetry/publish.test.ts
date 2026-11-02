@@ -4,6 +4,8 @@ import { EventEmitter } from "node:events";
 type FakeClient = EventEmitter & { subscribe: ReturnType<typeof vi.fn>; publish: ReturnType<typeof vi.fn>; opts: Record<string, unknown> };
 const h = vi.hoisted(() => ({ clients: [] as FakeClient[] }));
 
+vi.mock("./recordLevel", () => ({ recordLevel: vi.fn(async () => {}) }));
+
 vi.mock("mqtt", () => ({
   connect: vi.fn((_url: string, opts: Record<string, unknown>) => {
     const c = Object.assign(new EventEmitter(), { subscribe: vi.fn(), publish: vi.fn(), opts }) as FakeClient;
