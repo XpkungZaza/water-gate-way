@@ -157,3 +157,25 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   handle with the CI work (vitest major upgrade).
 - **Lesson:** 📌 GENERAL: run `npm audit --omit=dev` before every deploy, not only in CI; a framework CVE can land
   between two deploys of unchanged app code.
+- **Deploy 5b25df1:** deps changed, so node_modules could not be hard-linked; built a linux/amd64 production
+  node_modules in Docker on the Mac (`node:20.20.2-bookworm-slim`, `npm ci --omit=dev --ignore-scripts`; droplet
+  glibc 2.39 ≥ image 2.36) and rsynced it (446 MB). Smoke on :3100 passed (/_next/image 404), switched `current`,
+  Leo restarted at 09:25:48 UTC. Verified: process cwd releases/20261102-5b25df1; www.hyxc.io /login 200,
+  /register 200, /_next/image 404, /api/control 401; no error from the new process (one go2rtc AbortError at
+  09:22:12 came from the old process).
+- **Lesson:** 📌 GENERAL: when the server is too small to `npm ci`, install production deps for the target
+  platform in a matching container (`--platform linux/amd64`, same Node, glibc ≤ target) and ship them.
+
+## [--:--] CI (GitHub Actions)
+- **Action:** `.github/workflows/ci.yml`: on push and pull_request; `permissions: contents: read`; actions pinned
+  by commit SHA (checkout v7.0.1 `3d3c42e…`, setup-node v7.1.0 `949feb2…`); Node 20.20.2 (what the droplet runs).
+  Job `verify`: `npm ci --ignore-scripts`, vitest, `tsc --noEmit`, `npm run lint`, `npm run build`.
+  Job `audit`: `npm audit --audit-level=high` (prod and dev, blocking).
+- **Dev audit fix:** vitest 3.2.7 → 4.1.12 (exact). 4.x drops tinypool (critical prototype-pollution RCE) and
+  ships the fixed @vitest/mocker; vitest 5 was rejected because it needs Node ≥22 and CI must run prod's Node 20.
+  324/324 unchanged. Left: minimatch (moderate) via the eslint chain, no non-breaking fix; below the gate.
+- **Verified:** the exact steps in a fresh worktree on the Mac and in `node:20.20.2-bookworm-slim` (linux/amd64):
+  324 tests, tsc, lint 0 errors (3 known warnings), build, audit exit 0. YAML parses; actionlint not installed.
+- **Not verified:** a real GitHub run (needs the push).
+- **Lesson:** 📌 GENERAL: pin third-party actions to a commit SHA, not a tag; and test the CI steps in a container
+  with the runner's OS and Node before the first push.
