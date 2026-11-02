@@ -4,8 +4,11 @@ import { clientIp } from "./clientIp";
 const h = (o: Record<string, string>) => new Headers(o);
 
 describe("clientIp", () => {
-  it("first valid x-forwarded-for entry, trimmed", () => {
-    expect(clientIp(h({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" }))).toBe("203.0.113.9");
+  it("last x-forwarded-for entry (the hop our proxy appended), trimmed", () => {
+    expect(clientIp(h({ "x-forwarded-for": " 10.0.0.1 , 203.0.113.9 " }))).toBe("203.0.113.9");
+  });
+  it("a client-chosen value in front of the proxy's entry is ignored (no spoofed rate-limit bucket)", () => {
+    expect(clientIp(h({ "x-forwarded-for": "198.51.100.66, 203.0.113.9" }))).toBe("203.0.113.9");
   });
   it.each(["x", "1.2.3.4.5", "<script>"])("garbage XFF %s -> null", (v) => {
     expect(clientIp(h({ "x-forwarded-for": v }))).toBeNull();

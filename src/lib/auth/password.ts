@@ -32,27 +32,45 @@ export function needsRehash(stored: string): boolean {
   return !stored.startsWith("scrypt$");
 }
 
+// WHY: rejection paths that skip scrypt must still pay for one, or the time they save shows which rows exist.
+const DUMMY_SALT = Buffer.alloc(SALT_LEN);
+
 export async function verifyPassword(plain: string, stored: string): Promise<boolean> {
+  let ok = false;
+  let ranScrypt = false;
   try {
     if (stored.startsWith("$2")) {
       const m = BCRYPT_RE.exec(stored);
+      const cost = m ? Number(m[1]) : NaN;
       // WHY: the cost comes from the row, so cap it: an attacker-written cost 31 would stall the login for hours.
-      if (!m) return false;
-      const cost = Number(m[1]);
-      if (cost < BCRYPT_MIN_COST || cost > BCRYPT_MAX_COST) return false;
       // WHY: bcrypt ignores bytes after 72, so a longer input would match on its prefix alone.
-      if (Buffer.byteLength(plain, "utf8") > 72) return false;
-      return await bcrypt.compare(plain, stored);
+      if (m && cost >= BCRYPT_MIN_COST && cost <= BCRYPT_MAX_COST && Buffer.byteLength(plain, "utf8") <= 72) {
+        ok = await bcrypt.compare(plain, stored);
+      }
+    } else {
+      const [alg, n, r, p, saltB64, hashB64, extra] = stored.split("$");
+      const salt = Buffer.from(saltB64 ?? "", "base64");
+      const expected = Buffer.from(hashB64 ?? "", "base64");
+      // WHY: only accept our fixed params so a tampered row cannot pick cost (DoS) or weaken hashing.
+      if (
+        extra === undefined &&
+        alg === "scrypt" &&
+        n === String(N) &&
+        r === String(R) &&
+        p === String(P) &&
+        salt.length === SALT_LEN &&
+        expected.length === KEY_LEN
+      ) {
+        const actual = await derive(plain, salt);
+        ranScrypt = true;
+        ok = timingSafeEqual(actual, expected);
+      }
     }
-    const [alg, n, r, p, saltB64, hashB64, extra] = stored.split("$");
-    // WHY: only accept our fixed params so a tampered row cannot pick cost (DoS) or weaken hashing.
-    if (extra !== undefined || alg !== "scrypt" || n !== String(N) || r !== String(R) || p !== String(P)) return false;
-    const salt = Buffer.from(saltB64 ?? "", "base64");
-    const expected = Buffer.from(hashB64 ?? "", "base64");
-    if (salt.length !== SALT_LEN || expected.length !== KEY_LEN) return false;
-    const actual = await derive(plain, salt);
-    return timingSafeEqual(actual, expected);
   } catch {
-    return false;
+    ok = false;
   }
+  // shortcut: a legacy bcrypt row still costs bcrypt + scrypt, so it is slower than an unknown email until it is
+  // rehashed on its next login; force-reset legacy rows to close that gap fully.
+  if (!ranScrypt) await derive(plain, DUMMY_SALT).catch(() => undefined);
+  return ok;
 }

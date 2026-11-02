@@ -46,7 +46,7 @@ let seq = 0;
 function req(body: unknown, headers: Record<string, string> = {}, raw = false) {
   return new Request(`${APP}/api/control`, {
     method: "POST",
-    headers: { "content-type": "application/json", origin: APP, "x-forwarded-for": "203.0.113.9, 10.0.0.1", ...headers },
+    headers: { "content-type": "application/json", origin: APP, "x-forwarded-for": "10.0.0.1, 203.0.113.9", ...headers },
     body: raw ? (body as string) : JSON.stringify(body),
   });
 }

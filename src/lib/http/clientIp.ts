@@ -10,5 +10,8 @@ export function clientIp(h: Headers): string | null {
   // WHY: behind Cloudflare Tunnel only CF-Connecting-IP is set by the proxy; X-Forwarded-For and
   // X-Real-IP then come from the client, so no fallback to them (a spoofed value would dodge rate limits).
   if (process.env.CLIENT_IP_HEADER === "cf-connecting-ip") return valid(h.get("cf-connecting-ip")?.trim());
-  return valid(h.get("x-forwarded-for")?.split(",")[0]?.trim()) ?? valid(h.get("x-real-ip")?.trim()) ?? null;
+  // WHY: the last entry is the one our own proxy appended (nginx proxy_add_x_forwarded_for, Cloudflare);
+  // entries before it are whatever the client sent, so taking the first let a client pick its own bucket.
+  // Still trusts that a proxy is in front: Next only fills X-Forwarded-For when it is absent.
+  return valid(h.get("x-forwarded-for")?.split(",").at(-1)?.trim()) ?? valid(h.get("x-real-ip")?.trim()) ?? null;
 }

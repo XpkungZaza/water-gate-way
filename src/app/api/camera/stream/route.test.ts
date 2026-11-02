@@ -176,6 +176,51 @@ describe("GET /api/camera/stream", () => {
     await Promise.all(open.slice(1).map((r) => r.body!.cancel()));
   });
 
+  /** Opens n live streams as the current h.user; returns the responses so the test can close them. */
+  async function openStreams(n: number): Promise<Response[]> {
+    fetchMock.mockImplementation(async () => liveUpstream().res);
+    const out: Response[] = [];
+    for (let i = 0; i < n; i++) out.push(await GET(req("office1")));
+    return out;
+  }
+  const closeAll = (rs: Response[]) => Promise.all(rs.filter((r) => r.status === 200).map((r) => r.body!.cancel()));
+
+  it("viewers share a pool of 6 streams, so self-signed-up accounts cannot starve operators", async () => {
+    const open: Response[] = [];
+    for (let i = 0; i < 3; i++) {
+      h.user = { id: crypto.randomUUID(), role: "viewer" };
+      open.push(...(await openStreams(2)));
+    }
+    expect(open.every((r) => r.status === 200)).toBe(true);
+    h.user = { id: crypto.randomUUID(), role: "viewer" };
+    const extraViewer = await GET(req("office1"));
+    expect(extraViewer.status).toBe(429);
+    expect(await extraViewer.json()).toEqual({ error: "camera_busy" });
+
+    h.user = { id: crypto.randomUUID(), role: "operator" };
+    const operator = await GET(req("office1"));
+    expect(operator.status).toBe(200);
+    await closeAll([...open, operator]);
+  });
+
+  it("caps all streams at 12 so the Pi uplink is never oversubscribed", async () => {
+    const open: Response[] = [];
+    for (let i = 0; i < 2; i++) {
+      h.user = { id: crypto.randomUUID(), role: "admin" };
+      open.push(...(await openStreams(6)));
+    }
+    h.user = { id: crypto.randomUUID(), role: "operator" };
+    const thirteenth = await GET(req("office1"));
+    expect(thirteenth.status).toBe(429);
+    expect(await thirteenth.json()).toEqual({ error: "camera_busy" });
+    await closeAll(open);
+    // every slot is released: a fresh viewer can stream again
+    h.user = { id: crypto.randomUUID(), role: "viewer" };
+    const after = await openStreams(1);
+    expect(after[0].status).toBe(200);
+    await closeAll(after);
+  });
+
   it("a rejected request does not use up a slot", async () => {
     for (let i = 0; i < 10; i++) {
       fetchMock.mockResolvedValueOnce(new Response("boom", { status: 500 }));
