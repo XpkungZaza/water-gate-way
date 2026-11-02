@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { signOut } from "@/app/login/actions";
@@ -9,20 +10,14 @@ interface AppHeaderProps {
   isAdmin: boolean;
 }
 
-/** The product mark: a staff gauge (ไม้วัดระดับน้ำ) with the water line across it. */
+/** The product mark (public/logo-mark.png). Decorative: the product name always sits next to it as text. */
 export function BrandMark({ className = "size-7" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 28 28" className={className} aria-hidden="true">
-      <rect x="9" y="2" width="10" height="24" rx="1.5" className="fill-fg" />
-      {/* tick marks, every "metre" */}
-      {[6, 10, 14].map((y) => (
-        <rect key={y} x="9" y={y} width={y === 10 ? 6 : 4} height="1.5" className="fill-surface" />
-      ))}
-      {/* the water: brand blue from the line down */}
-      <rect x="9" y="17" width="10" height="9" className="fill-accent" />
-      <rect x="2" y="17" width="24" height="2" rx="1" className="fill-accent" />
-    </svg>
-  );
+  return <Image src="/logo-mark.png" alt="" width={128} height={128} className={className} />;
+}
+
+/** The mark with the name set beside it (public/logo.png). Put it inside the page's h1; `alt` names the product. */
+export function Wordmark({ className = "h-16 w-auto" }: { className?: string }) {
+  return <Image src="/logo.png" alt="Water Gate Way" width={480} height={177} priority className={className} />;
 }
 
 // WHY: no "use client"; it has no state, only links and a server-action form, so the client dashboard

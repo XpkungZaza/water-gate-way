@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BrandMark } from "@/components/AppHeader";
+import { Wordmark } from "@/components/AppHeader";
 import { getUser } from "@/lib/auth/dal";
 import RegisterForm from "./RegisterForm";
 
@@ -13,13 +13,8 @@ export default async function RegisterPage() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-bg px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-3">
-          <BrandMark className="size-10" />
-          <div>
-            <p className="text-2xl font-bold text-fg">Water Gate Way</p>
-            <p className="text-sm text-muted">ระดับน้ำ ปั๊ม และกล้องของประตูน้ำ</p>
-          </div>
-        </div>
+        <Wordmark />
+        <p className="mt-2 text-sm text-muted">ระดับน้ำ ปั๊ม และกล้องของประตูน้ำ</p>
         <div className="mt-6 rounded-lg border border-border bg-surface p-6">
           <h1 className="mb-1 text-base font-bold text-fg">สมัครใช้งาน</h1>
           <p className="mb-5 text-sm text-muted">บัญชีใหม่ดูข้อมูลได้อย่างเดียว ผู้ดูแลระบบเปลี่ยนสิทธิ์ให้ควบคุมอุปกรณ์ได้</p>

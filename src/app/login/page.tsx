@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BrandMark } from "@/components/AppHeader";
+import { Wordmark } from "@/components/AppHeader";
 import LoginForm from "./LoginForm";
 
 export const metadata: Metadata = { title: "เข้าสู่ระบบ · Water Gate Way" };
@@ -15,13 +15,10 @@ export default async function LoginPage({
   return (
     <main className="flex min-h-dvh items-center justify-center bg-bg px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-3">
-          <BrandMark className="size-10" />
-          <div>
-            <h1 className="text-2xl font-bold text-fg">Water Gate Way</h1>
-            <p className="text-sm text-muted">ระดับน้ำ ปั๊ม และกล้องของประตูน้ำ</p>
-          </div>
-        </div>
+        <h1>
+          <Wordmark />
+        </h1>
+        <p className="mt-2 text-sm text-muted">ระดับน้ำ ปั๊ม และกล้องของประตูน้ำ</p>
         <div className="mt-6 rounded-lg border border-border bg-surface p-6">
           <h2 className="mb-5 text-base font-bold text-fg">เข้าสู่ระบบ</h2>
           {/* WHY: the same notice for a new account and an existing email, so it reveals nothing. */}
