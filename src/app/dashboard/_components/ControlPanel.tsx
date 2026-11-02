@@ -79,11 +79,11 @@ export default function ControlPanel({ devices, stale, readOnly = false }: Props
 
   // The device confirmed: it now reports the target state, so say so briefly.
   // WHY: a stale reading may still hold an old value equal to the target; that is not a confirmation.
-  useEffect(() => {
-    if (note && note.phase === "waiting" && !stale && devices && devices[note.key] === note.target) {
-      setNote({ ...note, phase: "confirmed" });
-    }
-  }, [devices, note, stale]);
+  // WHY: updated during render, not in an effect (React's "adjust state when props change" pattern): the
+  // guard on phase "waiting" makes it run once, and it avoids an extra render with the old phase.
+  if (note && note.phase === "waiting" && !stale && devices && devices[note.key] === note.target) {
+    setNote({ ...note, phase: "confirmed" });
+  }
 
   // No confirmation within 15 s: say so and offer a one-tap retry of the same command.
   useEffect(() => {

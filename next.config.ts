@@ -17,6 +17,10 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // WHY: the app never uses next/image, and /_next/image is a public, unauthenticated endpoint (the proxy
+  // matcher skips it) that carried unauthenticated RCE advisories up to 16.4.0. With this set the server
+  // answers 404 there (next-server.js: `imagesConfig.unoptimized` -> render404), so nothing is decoded.
+  images: { unoptimized: true },
   async headers() {
     return [
       {

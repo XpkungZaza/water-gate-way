@@ -113,3 +113,47 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   Rig server now bound to 127.0.0.1 (the agent saw it reachable on the LAN).
 - **Lesson:** 📌 GENERAL: test timing defences by counting the expensive call, not by measuring wall time.
 - **Lesson:** 📌 GENERAL: in X-Forwarded-For only the rightmost hop your own proxy appended is trustworthy.
+
+## [--:--] Deploy 529424f to the droplet (asked by Leo)
+- **Checks (read-only):** current = 20261101-24d37ca; `CLIENT_IP_HEADER=cf-connecting-ip` and `PGOPTIONS` in
+  app.env; unit runs `next start -H 127.0.0.1 -p 3000`; wgw.users/admin_audit/gates/sessions exist (no migration);
+  package.json/lock unchanged since 24d37ca; 453 MB available, no swap.
+- **Action:** clean worktree at 529424f (324 tests, tsc, eslint, build); rsync `.next` (no dev/cache), public,
+  next.config.ts, package*.json to releases/20261102-529424f; `cp -al` node_modules from 24d37ca (no `npm ci`:
+  it was OOM-killed last time); smoke on 127.0.0.1:3100; then atomic switch (`ln -sfn current.new && mv -T`).
+- **Smoke:** /login 200, /register 200, /, /dashboard, /admin 307 to login; /api/control, camera, status 401;
+  HSTS, nosniff, DENY, Referrer-Policy, CSP present; RSS 121 MB; 0 errors in log. No sign-up was submitted on prod.
+- **Dead end:** `pkill -f "next start … 3100"` matched the ssh shell's own command line and killed it (exit 255);
+  the smoke server was already stopped by `kill $PID`. Lesson: 📌 GENERAL: `pkill -f` matches its own invoking
+  shell when the pattern appears in that shell's command; kill by PID instead.
+- **Rollback:** `ln -sfn /home/cmmc/wgw/releases/20261101-24d37ca current.new && mv -T current.new current`, then restart.
+- **Waiting:** Leo's `sudo systemctl restart water-gate` (cmmc has no passwordless sudo).
+- **First restart (09:08 UTC) ran the OLD release:** `current` had been pointed back to 20261101-24d37ca at
+  09:07:45, 20 s before the restart, most likely because both command blocks in my message (deploy restart and the
+  rollback line) were run. Re-switched to 20261102-529424f on Leo's word; Leo restarted again at 09:09:36.
+- **Verified live:** process cwd = releases/20261102-529424f; www.hyxc.io /login 200, /register 200 with the
+  form, login page links to /register, /dashboard 307 to login, /api/control and camera 401; 0 error lines.
+- **Lesson:** 📌 GENERAL: never put a rollback command next to the deploy command in the same message; give it
+  only when asked, or label it so it cannot be run by accident. And check what the process actually runs
+  (`readlink /proc/<pid>/cwd`), not what the symlink says.
+
+## [--:--] 🔴 Next.js 16.2.2 → 16.4.3 (found while preparing CI)
+- **Finding:** `npm audit --omit=dev` on the deployed lock: 1 critical, 6 high. Next 16.2.2 is in range of
+  unauthenticated RCE in the Image Optimization API (SVG `<=16.4.0`, AVIF `<16.3.3`), several Middleware/Proxy
+  bypasses, Server Action DoS, SSRF. Prod `https://www.hyxc.io/_next/image?url=/favicon.ico&w=64` answered 200
+  without a session (the proxy matcher skips `_next/image`); `public/` held 5 unused template SVGs.
+  Exploitability not proven (no exploit run); treated as P0 because the host controls pumps.
+- **Action (approved by Leo):** `npm install --save-exact next@16.4.3 eslint-config-next@16.4.3`, `npm audit fix`
+  (prod deps: 0 vulnerabilities); `images: { unoptimized: true }` in next.config.ts (traced: next-server.js
+  renders 404 for /_next/image when set); removed public/*.svg (unused anywhere).
+- **New lint errors (react-hooks/set-state-in-effect):** ControlPanel's confirm step moved from an effect to a
+  guarded render-phase update (React's "adjust state when props change" pattern); the chart's first load wrapped
+  in an async IIFE (fetchWaterLevels awaits fetch before any setState). 3 warnings about
+  `window.location.assign("/login…")` kept on purpose (full reload on session expiry).
+- **Result:** 324/324, tsc clean, eslint 0 errors, build OK. Rig: /_next/image 404; command flow traced with a
+  MutationObserver: P1 sending → confirmed at 52 ms → cleared at 3055 ms; P0 against a device that stays on:
+  waiting → "ยังไม่ยืนยัน" at 15058 ms.
+- **Dev-only audit left:** vitest chain (tinypool critical, @vitest/mocker, minimatch) runs only in dev/CI;
+  handle with the CI work (vitest major upgrade).
+- **Lesson:** 📌 GENERAL: run `npm audit --omit=dev` before every deploy, not only in CI; a framework CVE can land
+  between two deploys of unchanged app code.

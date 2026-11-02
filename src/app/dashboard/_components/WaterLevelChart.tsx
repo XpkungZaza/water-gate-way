@@ -91,7 +91,10 @@ export default function WaterLevelChart() {
   }, []);
 
   useEffect(() => {
-    fetchWaterLevels();
+    // WHY: the first load awaits the network before any setState, so this is not a synchronous update.
+    void (async () => {
+      await fetchWaterLevels();
+    })();
     const id = setInterval(fetchWaterLevels, POLL_MS);
     return () => clearInterval(id);
   }, [fetchWaterLevels]);
