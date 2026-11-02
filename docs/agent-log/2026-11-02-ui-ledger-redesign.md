@@ -343,3 +343,25 @@ Review before this (critique, inspector numbers) is in the session; screenshots 
   array, test that it is stable by counting side effects (connections), not by reading the library docs.
   📌 GENERAL: a background subscriber that starts on the first request records nothing while nobody is looking;
   start it at process boot (Next `instrumentation.ts`).
+
+## [--:--] Deploy 63587a0 (lint warnings + server-side level recorder) and what prod showed afterwards
+- **Deploy:** clean worktree, 354 tests / tsc / lint 0 problems / audit 0 high; deps unchanged, node_modules
+  hard-linked from 20261102-0658fb5; smoke on :3100 with `MQTT_URL` unset (so the test instance could not write to the
+  production table); the boot log showed the telemetry line without any request, i.e. `register()` runs at start.
+  Prod `water_levels` was 0 rows before the switch. Leo restarted at ~12:19 UTC.
+- **Prod result:** the recorder wrote rows with nobody on the dashboard: ids 1-3 at 12:19:29, 12:19:37, 12:19:55, then
+  12:24:55 and 12:29:55 (exactly 05:00 apart, the designed interval). The 8 s and 18 s gaps are process starts:
+  `ActiveEnterTimestamp` moved from 12:19:27 to 12:19:51 (the service was restarted at least twice within ~30 s,
+  `NRestarts=0` so not a crash loop; cause: the restart command was run from two terminal tabs, tab 2 at 12:19:27 and
+  tab 3 at 12:19:51, whose session shows login 12:19:31 and the `active` output), and every start records its first sample at once. The one `/login` 502 seen
+  at that moment matches the second start. Not a recorder bug.
+- **Rows stop after 12:29:55:** the Pi went off the network. From 12:33 the service log shows only
+  `go2rtc unreachable` (the Pi's camera server), tailscale shows `water` offline, the droplet broker has 0 Pi
+  connections, and there is no `[telemetry] level insert failed` line in that period, so the DB path is healthy.
+  Exact moment the Pi stopped publishing: between 12:29:55 and 12:34:55 (no row at 12:34:55).
+- **Not verified on prod:** the chart in a signed-in browser (needs Leo's account); there are 5 rows, so it can draw.
+  Level values recorded: 1.155, 1.155, 1.49, 0.415, 0.42 m (earlier today the same sensor read 2.236 m; the bench
+  sensor moves, or `sensor_height` on the Pi differs from what the dashboard assumed: not investigated).
+- **Lesson:** 📌 GENERAL: when rows land at odd intervals, read the process start time before suspecting the
+  throttle; "first sample on start" plus a double restart looks exactly like a broken interval.
+  📌 GENERAL: before blaming your code for a data gap, check the data source (here: the Pi was powered off).
