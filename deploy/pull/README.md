@@ -1,4 +1,4 @@
-# Pull deploy (CD, Docker image flow)
+# Pull deploy (CD, Docker image + Compose flow)
 
 ```
 push to main -> GitHub Actions: test, typecheck, lint, build, audit -> release job
@@ -6,8 +6,9 @@ push to main -> GitHub Actions: test, typecheck, lint, build, audit -> release j
    ghcr.io/leotawee/water-gate-way:{sha-<full sha>, main}, prunes GHCR to the 10 newest sha-* versions
 droplet timer (every 5 min) -> pull-deploy.sh:
    newest successful main run -> sha-<sha> -> resolve GHCR digest -> docker pull by digest
-   -> candidate on 127.0.0.1:3100 with --env-file ~/wgw/app.env, GET /login = 200
-   -> switch live container on 127.0.0.1:3000, GET /login = 200, else roll back to the previous image
+   -> docker compose project `wgw-candidate` (docker-compose.yml) on 127.0.0.1:3100, TELEMETRY_RECORD=0, GET /login = 200
+   -> docker compose project `wgw` on 127.0.0.1:3000 (same file, new image digest), GET /login = 200,
+      else `compose up` the previous image again
    -> keep the 3 newest local images + the running one, remove the rest
 ```
 
@@ -31,14 +32,16 @@ on the anonymous token/pull and the deployer logs `FAIL`.
    **Security note:** membership in the `docker` group is root-equivalent — any container mount gives root.
    Rootless Docker is the safer option and works here (the container is non-root already); decide for yourself.
 2. If the droplet has less than ~10 GB free on `/`, prune old images once: `docker image prune -a`.
-3. Copy the script: `mkdir -p ~/wgw/deploy && cp pull-deploy.sh ~/wgw/deploy/ && chmod +x ~/wgw/deploy/pull-deploy.sh`.
+3. Copy the script and the compose file together (the script looks for `docker-compose.yml` next to itself):
+   `mkdir -p ~/wgw/deploy && cp pull-deploy.sh docker-compose.yml ~/wgw/deploy/ && chmod +x ~/wgw/deploy/pull-deploy.sh`.
+   Needs the `docker compose` plugin (`docker compose version`).
    The deployer runs entirely as `cmmc`; no sudoers entry is needed anymore (the old `systemctl restart`
    sudoers rule can be removed).
 4. Install the units: copy `water-gate.service`, `water-gate-deploy.service` and `water-gate-deploy.timer` to
    `/etc/systemd/system/` (disable/remove the old `water-gate` unit that ran `next start`), then
    `sudo systemctl daemon-reload && sudo systemctl enable --now water-gate.service water-gate-deploy.timer`.
    `water-gate.service` is a oneshot that starts the live container after a reboot (the container is also
-   created with `--restart unless-stopped`, so the Docker daemon normally restores it first).
+   created with `restart: unless-stopped`, so the Docker daemon normally restores it first).
 5. Check: `systemctl list-timers | grep water-gate-deploy`, `journalctl -u water-gate-deploy -n 30`,
    `docker ps` (live container publishes 127.0.0.1:3000->3000 only), and `curl -s -o /dev/null -w '%{http_code}' \
    http://127.0.0.1:3000/login` prints 200.
@@ -50,12 +53,13 @@ publish Postgres or Mosquitto on 0.0.0.0 to "fix" this.
 
 ## Rollback and pause
 
-- Rollback one version: rerun the deployer with the previous digest pinned, or by hand:
-  `docker rm -f wgw-live && docker run -d --name wgw-live --restart unless-stopped -p 127.0.0.1:3000:3000 \
-  --env-file ~/wgw/app.env --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
-  --memory 256m ghcr.io/leotawee/water-gate-way@sha256:<digest of the previous version>`, then remove the
-  \`last-deployed\` files so the timer does not immediately redeploy (`rm ~/wgw/last-deployed*\`).
-- List what ran when: `docker inspect wgw-live --format '{{.Config.Image}} {{.State.StartedAt}}'`.
+- Rollback one version, by hand (the container is `wgw-app-1`; `docker inspect wgw-app-1 --format '{{.Config.Image}}'`
+  shows what runs now):
+  `cd ~/wgw/deploy && WGW_IMAGE=ghcr.io/leotawee/water-gate-way@sha256:<previous digest> WGW_PORT=3000 \
+  TELEMETRY_RECORD=1 ENV_FILE=$HOME/wgw/app.env docker compose -p wgw up -d --pull never`
+  (the previous image must still be local; the deployer keeps the 3 newest). Then `rm ~/wgw/last-deployed*` so the
+  timer does not immediately redeploy the newest build.
+- List what ran when: `docker inspect wgw-app-1 --format '{{.Config.Image}} {{.State.StartedAt}}'`.
 - Pause deploys: `sudo systemctl stop water-gate-deploy.timer`.
 - A crashed run leaves `~/wgw/.deploy.lock`; the next run takes over when its pid is dead.
 
