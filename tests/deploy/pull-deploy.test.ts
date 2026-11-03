@@ -37,7 +37,7 @@ case "$1" in
     exit 0 ;;
   inspect)
     if img="$(getp wgw-web)"; then
-      case "$4" in *Config.Image*) echo "$img" ;; *) echo "id-live" ;; esac
+      case "$4" in *Config.Image*) echo "$img" ;; *) echo "img-prev" ;; esac
       exit 0
     fi
     exit 1 ;;
@@ -128,17 +128,21 @@ describe("deploy/pull/pull-deploy.sh (fake docker compose)", () => {
     expect(r.log).toContain("docker pull " + REF);
     // candidate: port 3100, must not record rows, then torn down
     const cand = composeCalls(r.log, "wgw-candidate");
-    expect(cand[0]).toContain("up -d --pull never");
-    expect(cand[0]).toContain("image=" + REF + " port=3100 rec=0");
+    const candUp = cand.find((l) => l.includes(" up -d"));
+    expect(candUp).toContain("up -d --pull never");
+    expect(candUp).toContain("image=" + REF + " port=3100 rec=0");
     expect(cand.some((l) => l.includes(" down"))).toBe(true);
     // live: port 3000, records rows, same pinned digest
     const live = composeCalls(r.log, "wgw-web");
     expect(live[0]).toContain("image=" + REF + " port=3000 rec=1");
     expect(readFileSync(join(sandbox, "wgw", "last-deployed"), "utf8")).toBe("sha-" + SHA_A + "\n");
     expect(readFileSync(join(sandbox, "wgw", "last-deployed.digest"), "utf8")).toBe(DIGEST + "\n");
-    // prune: keep 3 newest + the running image; the two oldest go
-    expect(r.log).toContain("docker rmi -f img-old4");
-    expect(r.log).toContain("docker rmi -f img-old5");
+    // cleanup runs BEFORE the pull: only the newest image + the running one (img-prev) survive it
+    const lines = r.log.split("\n");
+    const pullAt = lines.findIndex((l) => l.startsWith("docker pull"));
+    const rmiBefore = lines.slice(0, pullAt).filter((l) => l.startsWith("docker rmi"));
+    expect(rmiBefore).toEqual(["docker rmi -f img-new2 [image= port= rec=]", "docker rmi -f img-old4 [image= port= rec=]", "docker rmi -f img-old5 [image= port= rec=]"]);
+    // after the deploy: keep 3 newest (KEEP_IMAGES=3 in this test) + the running one
     expect(r.log).not.toContain("docker rmi -f img-prev");
     expect(r.log).not.toContain("docker rmi -f img-new1");
   });

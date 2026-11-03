@@ -18,7 +18,8 @@ ENV_FILE="${ENV_FILE:-$ROOT/app.env}"
 WGW_COMPOSE="${WGW_COMPOSE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-compose.yml}"
 SMOKE_PORT="${SMOKE_PORT:-3100}"
 LIVE_PORT="${LIVE_PORT:-3000}"
-KEEP_IMAGES="${KEEP_IMAGES:-3}"
+# After a successful deploy keep the new image plus the one before it (the manual rollback target).
+KEEP_IMAGES="${KEEP_IMAGES:-2}"
 HEALTH_TRIES="${HEALTH_TRIES:-30}"
 # WHY not `wgw`: the existing Postgres compose project is already named wgw; sharing it makes compose treat the
 # database as an orphan of this one (and `down --remove-orphans` would remove it).
@@ -73,7 +74,26 @@ if [[ -f "$STATE_DIGEST" && "$(cat "$STATE_DIGEST")" == "$digest" ]]; then
   log "already deployed $digest"; printf '%s\n' "$tag" >"$STATE"; exit 0
 fi
 
+# prune_images <keep>: remove every local image of this repo except the <keep> newest and the one the live
+# container runs. `docker rmi` refuses an image a running container uses, so a mistake here cannot break live.
+prune_images() {
+  local keep="$1" running
+  running="$(docker inspect "$LIVE_CONTAINER" --format '{{.Image}}' 2>/dev/null || true)"
+  docker images "$IMAGE" --format '{{.CreatedAt}}|{{.ID}}' 2>/dev/null | sort -r | tail -n +"$((keep + 1))" | cut -d'|' -f2 |
+    while read -r id; do
+      [[ -z "$id" || "$id" == "$running" ]] && continue
+      log "removing old image $id"
+      docker rmi -f "$id" >/dev/null 2>&1 || true
+    done
+}
+
 new_ref="$IMAGE@$digest"
+# Clean first, then fetch: only the running image survives, so the disk never holds old + new + leftovers at once
+# (the droplet has ~5 GB free). Stale candidate containers/networks and dangling layers go too.
+# (compose interpolates required variables even for `down`, so give it placeholders)
+WGW_IMAGE=unused ENV_FILE="$ENV_FILE" docker compose -p "$CAND_PROJECT" -f "$WGW_COMPOSE" down >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+prune_images 1
 docker pull "$new_ref" >/dev/null || die "docker pull failed for $digest"
 
 # dc <project> <image> <host port> <record telemetry 0|1> <compose args...>
@@ -126,11 +146,6 @@ printf '%s\n' "$digest" >"$STATE_DIGEST"
 printf '%s\n' "$tag" >"$STATE"
 log "live: $tag ($digest)"
 
-# Keep the $KEEP_IMAGES newest local images of this repo plus the running one; remove the rest.
-running="$(docker inspect "$LIVE_CONTAINER" --format '{{.Image}}' 2>/dev/null || true)"
-docker images "$IMAGE" --format '{{.CreatedAt}}|{{.ID}}' 2>/dev/null | sort -r | tail -n +"$((KEEP_IMAGES + 1))" | cut -d'|' -f2 |
-  while read -r id; do
-    [[ -z "$id" || "$id" == "$running" ]] && continue
-    log "removing old image $id"
-    docker rmi -f "$id" >/dev/null 2>&1 || true
-  done
+# Keep $KEEP_IMAGES newest (new + previous), drop the rest.
+prune_images "$KEEP_IMAGES"
+docker image prune -f >/dev/null 2>&1 || true
