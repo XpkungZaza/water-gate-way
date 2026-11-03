@@ -51,6 +51,23 @@ deployer adds `--add-host host.docker.internal:host-gateway`; if `~/wgw/app.env`
 broker, or go2rtc by loopback, change those hosts to `host.docker.internal` (or the docker bridge IP). Do not
 publish Postgres or Mosquitto on 0.0.0.0 to "fix" this.
 
+## Push deploy (Actions over Tailscale), optional
+
+The `deploy` job in `ci.yml` runs after `release`: it joins the tailnet (`tag:cicd`), then runs
+`ssh cmmc@<droplet> <commit sha>`. The droplet key is restricted to `pull-deploy.sh`, which validates the sha
+and deploys that exact commit. The 5-minute timer stays as a fallback; the lock file stops them overlapping.
+Without the secrets the job logs a notice and skips; it does not fail.
+
+Owner setup (once):
+
+1. Tailscale admin: create an OAuth client with scope `auth_keys` for `tag:cicd`; in the ACL allow
+   `tag:cicd` -> the droplet on port 22 (and define `tag:cicd` in `tagOwners`).
+2. `ssh-keygen -t ed25519 -f deploy_key -N ''`. On the droplet add to `~cmmc/.ssh/authorized_keys`, on one line:
+   `command="/home/cmmc/wgw/deploy/pull-deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA...`
+3. `ssh-keyscan -t ed25519 <droplet tailnet ip>` -> this line is `DEPLOY_KNOWN_HOSTS`.
+4. GitHub repo -> Settings -> Secrets and variables -> Actions: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
+   `DEPLOY_HOST` (droplet tailnet IP), `DEPLOY_USER` (`cmmc`), `DEPLOY_SSH_KEY` (private key), `DEPLOY_KNOWN_HOSTS`.
+
 ## Rollback and pause
 
 - Rollback one version, by hand (the container is `wgw-app-1`; `docker inspect wgw-app-1 --format '{{.Config.Image}}'`

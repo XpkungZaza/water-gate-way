@@ -114,3 +114,51 @@ jobs:
             while read -r id; do gh api -X DELETE "$base/$id" || echo "prune: could not delete version $id"; done
           jq -r '[.[] | select(.metadata.container.tags | any(startswith("sha-")))] | .[10:][] | .id' sorted.json |
             while read -r id; do gh api -X DELETE "$base/$id" || echo "prune: could not delete version $id"; done
+
+  deploy:
+    name: Deploy to droplet over Tailscale
+    needs: [release]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # WHY one at a time and never cancelled: a half-finished deploy must complete before the next starts.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      # WHY skip, not fail: until the owner adds the secrets, the timer on the droplet still deploys.
+      - name: Check deploy secrets
+        id: cfg
+        run: |
+          ok=true
+          for v in TS_OAUTH_CLIENT_ID TS_OAUTH_SECRET DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            [ -n "${!v}" ] || { echo "::notice::secret for $v is not set; skipping push deploy (the droplet timer still pulls)"; ok=false; }
+          done
+          echo "ready=$ok" >> "$GITHUB_OUTPUT"
+      - name: Join tailnet
+        if: steps.cfg.outputs.ready == 'true'
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:cicd
+      - name: Deploy this commit
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          # WHY a pinned known_hosts secret, not ssh-keyscan: scanning would trust whatever answers on first contact.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The only argument is the commit sha; the droplet key is forced to run pull-deploy.sh and the
+          # script validates the sha (^[0-9a-f]{40}$) before using it.
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$GITHUB_SHA"

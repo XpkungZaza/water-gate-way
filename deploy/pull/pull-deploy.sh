@@ -40,10 +40,18 @@ fi
 echo $$ >"$LOCK/pid"
 trap 'rm -rf "$LOCK"' EXIT
 
-# Newest successful CI run on main: its head sha is the image tag sha-<full sha> pushed by the release job.
-run_json="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$RUNS_API")" || die "runs API unreachable"
-sha="$(jq -r '.workflow_runs[0].head_sha // empty' <<<"$run_json")"
-[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "no successful main run found"
+# A push deploy (Actions over Tailscale) names the exact commit: via the forced SSH command (SSH_ORIGINAL_COMMAND)
+# or $1. Otherwise (timer) take the newest successful CI run on main. Either way the image tag is sha-<full sha>,
+# pushed by the release job. WHY validate: the value comes from the network and is used in a URL.
+req="${SSH_ORIGINAL_COMMAND:-${1:-}}"
+if [[ -n "$req" ]]; then
+  [[ "$req" =~ ^[0-9a-f]{40}$ ]] || die "argument is not a 40-char commit sha"
+  sha="$req"
+else
+  run_json="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$RUNS_API")" || die "runs API unreachable"
+  sha="$(jq -r '.workflow_runs[0].head_sha // empty' <<<"$run_json")"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "no successful main run found"
+fi
 tag="sha-$sha"
 if [[ -f "$STATE" && "$(cat "$STATE")" == "$tag" ]]; then
   log "already deployed $tag"

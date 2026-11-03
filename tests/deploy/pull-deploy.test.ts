@@ -81,7 +81,7 @@ function setupSandbox(o: Opts) {
   if (o.stateSha) writeInSandbox("wgw/last-deployed", "sha-" + o.stateSha + "\n");
 }
 
-function runDeployer(): { code: number; log: string; out: string } {
+function runDeployer(extraEnv: Record<string, string> = {}): { code: number; log: string; out: string } {
   let out = "";
   let code = 0;
   try {
@@ -98,6 +98,7 @@ function runDeployer(): { code: number; log: string; out: string } {
         KEEP_IMAGES: "3",
         WGW_FAKE_STATE: sandbox,
         WGW_FAKE_DIGEST: DIGEST,
+        ...extraEnv,
       },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -170,5 +171,20 @@ describe("deploy/pull/pull-deploy.sh (fake docker compose)", () => {
     expect(live[1]).toContain("image=" + PREV);
     expect(readFileSync(join(sandbox, "containers.txt"), "utf8")).toContain("wgw " + PREV);
     expect(existsSync(join(sandbox, "wgw", "last-deployed"))).toBe(false);
+  });
+
+  it("push deploy: uses the sha from SSH_ORIGINAL_COMMAND instead of the runs API", () => {
+    setupSandbox({ newSha: SHA_A }); // the runs API would say A
+    const r = runDeployer({ SSH_ORIGINAL_COMMAND: SHA_B });
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(sandbox, "wgw", "last-deployed"), "utf8")).toBe("sha-" + SHA_B + "\n");
+  });
+
+  it("push deploy: rejects anything that is not a 40-char sha, before touching docker", () => {
+    setupSandbox({ newSha: SHA_A });
+    const r = runDeployer({ SSH_ORIGINAL_COMMAND: "abc; rm -rf ~" });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("not a 40-char commit sha");
+    expect(r.log).not.toContain("docker");
   });
 });
