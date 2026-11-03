@@ -65,7 +65,8 @@ docker pull "$IMAGE@$digest" >/dev/null || die "docker pull failed for $digest"
 # The server binds 0.0.0.0 INSIDE the container; only the publish maps it to 127.0.0.1 on the host.
 # WHY host-gateway: the container is on the bridge network, so 127.0.0.1 inside it is NOT the host. If app.env
 # reaches host services by loopback, the owner must point it at host.docker.internal (documented in the README).
-start_container() { # name port restart-policy image
+# WHY $5 (optional KEY=VAL): the candidate shares the live DB, so it must not record water-level rows.
+start_container() { # name port restart-policy image [env]
   docker run -d --name "$1" \
     --pull=never \
     --env-file "$ENV_FILE" \
@@ -76,6 +77,7 @@ start_container() { # name port restart-policy image
     --memory 256m \
     --add-host host.docker.internal:host-gateway \
     --restart "$3" \
+    ${5:+--env} ${5:+"$5"} \
     "$4"
 }
 
@@ -99,7 +101,7 @@ fi
 # --- candidate on :3100 ---
 docker rm -f "$CAND_NAME" >/dev/null 2>&1 || true
 log "starting candidate $digest on 127.0.0.1:$SMOKE_PORT"
-start_container "$CAND_NAME" "$SMOKE_PORT" no "$IMAGE@$digest" >/dev/null || die "candidate run failed"
+start_container "$CAND_NAME" "$SMOKE_PORT" no "$IMAGE@$digest" TELEMETRY_RECORD=0 >/dev/null || die "candidate run failed"
 if ! health "$SMOKE_PORT"; then
   log "candidate unhealthy; log tail:"; docker logs --tail 20 "$CAND_NAME" >&2 || true
   docker rm -f "$CAND_NAME" >/dev/null 2>&1 || true

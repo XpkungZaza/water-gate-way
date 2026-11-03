@@ -41,7 +41,8 @@ const realInsert = (liquid: number, at: Date) =>
     at,
   ]);
 
-export const recordLevel: (status: GateStatus) => Promise<void> = createLevelRecorder(
-  realInsert,
-  sampleMs(process.env.WATER_LEVEL_SAMPLE_SEC),
-);
+// WHY TELEMETRY_RECORD=0: the deploy candidate shares the live DB; it must not write duplicate samples.
+export const recordLevel: (status: GateStatus) => Promise<void> =
+  process.env.TELEMETRY_RECORD === "0"
+    ? async () => {}
+    : createLevelRecorder(realInsert, sampleMs(process.env.WATER_LEVEL_SAMPLE_SEC));

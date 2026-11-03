@@ -96,6 +96,10 @@ describe("deploy/pull/pull-deploy.sh (fake docker)", () => {
     expect(r.log).not.toMatch(/--publish 0\.0\.0\.0/);
     expect(r.log).toContain("--read-only");
     expect(r.log).toContain("--cap-drop ALL");
+    // only the candidate is told not to record; live must record
+    const runs = r.log.split("\n").filter((l) => l.startsWith("docker run"));
+    expect(runs.find((l) => l.includes("wgw-candidate"))).toContain("TELEMETRY_RECORD=0");
+    expect(runs.find((l) => l.includes("wgw-live"))).not.toContain("TELEMETRY_RECORD");
     expect(r.log).toContain("--memory 256m");
     expect(readFileSync(join(sandbox, "wgw", "last-deployed"), "utf8")).toBe("sha-" + SHA_A + "\n");
     // prune: keep 3 newest + the running image; the two oldest go
