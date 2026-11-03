@@ -21,7 +21,7 @@ LABEL org.opencontainers.image.source="https://github.com/leotawee/water-gate-wa
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    # The server binds 0.0.0.0 INSIDE the container; the deployer publishes 127.0.0.1 only.
+    # Default for `docker run -p`; the compose file overrides HOSTNAME=127.0.0.1 because it uses host networking.
     HOSTNAME=0.0.0.0 \
     PORT=3000
 RUN groupadd --gid 10001 nextjs && useradd --uid 10001 --gid nextjs --create-home --shell /usr/sbin/nologin nextjs
@@ -32,5 +32,5 @@ USER nextjs
 EXPOSE 3000
 # WHY node instead of a curl/wget install: the slim base ships node; no extra package, no extra CVE surface.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "server.js"]

@@ -15,8 +15,8 @@ User=cmmc
 Environment=HOME=/home/cmmc
 RemainAfterExit=yes
 # WHY rm the state files in the fallback: without them the deployer says "already deployed" and recreates nothing.
-ExecStart=/bin/sh -c 'docker start wgw-app-1 || { rm -f /home/cmmc/wgw/last-deployed /home/cmmc/wgw/last-deployed.digest; /home/cmmc/wgw/deploy/pull-deploy.sh; }'
-ExecStop=/usr/bin/docker stop wgw-app-1
+ExecStart=/bin/sh -c 'docker start wgw-web-app-1 || { rm -f /home/cmmc/wgw/last-deployed /home/cmmc/wgw/last-deployed.digest; /home/cmmc/wgw/deploy/pull-deploy.sh; }'
+ExecStop=/usr/bin/docker stop wgw-web-app-1
 
 [Install]
 WantedBy=multi-user.target

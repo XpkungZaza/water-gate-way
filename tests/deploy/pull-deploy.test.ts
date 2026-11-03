@@ -36,7 +36,7 @@ case "$1" in
     esac
     exit 0 ;;
   inspect)
-    if img="$(getp wgw)"; then
+    if img="$(getp wgw-web)"; then
       case "$4" in *Config.Image*) echo "$img" ;; *) echo "id-live" ;; esac
       exit 0
     fi
@@ -74,7 +74,7 @@ function setupSandbox(o: Opts) {
   writeInSandbox("calls.log", "");
   if (o.liveCode) writeInSandbox("live_code", o.liveCode);
   if (o.smokeCode) writeInSandbox("smoke_code", o.smokeCode);
-  if (o.preLive) writeInSandbox("containers.txt", "wgw " + o.preLive + "\n");
+  if (o.preLive) writeInSandbox("containers.txt", "wgw-web " + o.preLive + "\n");
   if (o.images) writeInSandbox("images.txt", o.images);
   mkdirSync(join(sandbox, "wgw"));
   writeInSandbox("wgw/app.env", "PGHOST=x\n");
@@ -132,7 +132,7 @@ describe("deploy/pull/pull-deploy.sh (fake docker compose)", () => {
     expect(cand[0]).toContain("image=" + REF + " port=3100 rec=0");
     expect(cand.some((l) => l.includes(" down"))).toBe(true);
     // live: port 3000, records rows, same pinned digest
-    const live = composeCalls(r.log, "wgw");
+    const live = composeCalls(r.log, "wgw-web");
     expect(live[0]).toContain("image=" + REF + " port=3000 rec=1");
     expect(readFileSync(join(sandbox, "wgw", "last-deployed"), "utf8")).toBe("sha-" + SHA_A + "\n");
     expect(readFileSync(join(sandbox, "wgw", "last-deployed.digest"), "utf8")).toBe(DIGEST + "\n");
@@ -156,7 +156,7 @@ describe("deploy/pull/pull-deploy.sh (fake docker compose)", () => {
     const r = runDeployer();
     expect(r.code).not.toBe(0);
     expect(composeCalls(r.log, "wgw-candidate").length).toBeGreaterThan(0);
-    expect(composeCalls(r.log, "wgw")).toHaveLength(0);
+    expect(composeCalls(r.log, "wgw-web")).toHaveLength(0);
     expect(r.out).toContain("live container untouched");
     expect(existsSync(join(sandbox, "wgw", "last-deployed"))).toBe(false);
   });
@@ -166,10 +166,10 @@ describe("deploy/pull/pull-deploy.sh (fake docker compose)", () => {
     const r = runDeployer();
     expect(r.code).not.toBe(0);
     expect(r.out).toContain("rolled back");
-    const live = composeCalls(r.log, "wgw");
+    const live = composeCalls(r.log, "wgw-web");
     expect(live[0]).toContain("image=" + REF);
     expect(live[1]).toContain("image=" + PREV);
-    expect(readFileSync(join(sandbox, "containers.txt"), "utf8")).toContain("wgw " + PREV);
+    expect(readFileSync(join(sandbox, "containers.txt"), "utf8")).toContain("wgw-web " + PREV);
     expect(existsSync(join(sandbox, "wgw", "last-deployed"))).toBe(false);
   });
 

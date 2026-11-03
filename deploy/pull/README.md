@@ -7,7 +7,7 @@ push to main -> GitHub Actions: test, typecheck, lint, build, audit -> release j
 droplet timer (every 5 min) -> pull-deploy.sh:
    newest successful main run -> sha-<sha> -> resolve GHCR digest -> docker pull by digest
    -> docker compose project `wgw-candidate` (docker-compose.yml) on 127.0.0.1:3100, TELEMETRY_RECORD=0, GET /login = 200
-   -> docker compose project `wgw` on 127.0.0.1:3000 (same file, new image digest), GET /login = 200,
+   -> docker compose project `wgw-web` on 127.0.0.1:3000 (same file, new image digest), GET /login = 200,
       else `compose up` the previous image again
    -> keep the 3 newest local images + the running one, remove the rest
 ```
@@ -46,10 +46,16 @@ on the anonymous token/pull and the deployer logs `FAIL`.
    `docker ps` (live container publishes 127.0.0.1:3000->3000 only), and `curl -s -o /dev/null -w '%{http_code}' \
    http://127.0.0.1:3000/login` prints 200.
 
-**Host loopback services:** inside the bridge network, 127.0.0.1 is the container itself, not the host. The
-deployer adds `--add-host host.docker.internal:host-gateway`; if `~/wgw/app.env` reaches Postgres, the MQTT
-broker, or go2rtc by loopback, change those hosts to `host.docker.internal` (or the docker bridge IP). Do not
-publish Postgres or Mosquitto on 0.0.0.0 to "fix" this.
+**Networking:** the compose file uses `network_mode: host` with `HOSTNAME=127.0.0.1`, so `app.env` keeps
+reaching Postgres (docker-published on 127.0.0.1:5432) and Mosquitto by loopback and nothing needs editing. The
+app listens on loopback only (verified: the same image with the default `HOSTNAME=0.0.0.0` also answers on its
+non-loopback address; with `127.0.0.1` only loopback answers). Trade-off: the container shares the host network
+namespace, so it can reach every loopback-only host service; the filesystem, capability and memory limits still apply.
+
+**First cutover:** the old `next start` unit (`water-gate`) holds 127.0.0.1:3000, so the first compose deploy
+cannot bind it. Stop and disable that unit right before the first deploy (owner, sudo):
+`sudo systemctl disable --now water-gate` (then step 4's new `water-gate.service` takes its name), and keep
+nginx pointing at 127.0.0.1:3000.
 
 ## Push deploy (Actions over Tailscale), optional
 
@@ -70,13 +76,13 @@ Owner setup (once):
 
 ## Rollback and pause
 
-- Rollback one version, by hand (the container is `wgw-app-1`; `docker inspect wgw-app-1 --format '{{.Config.Image}}'`
+- Rollback one version, by hand (the container is `wgw-web-app-1`; `docker inspect wgw-web-app-1 --format '{{.Config.Image}}'`
   shows what runs now):
   `cd ~/wgw/deploy && WGW_IMAGE=ghcr.io/leotawee/water-gate-way@sha256:<previous digest> WGW_PORT=3000 \
-  TELEMETRY_RECORD=1 ENV_FILE=$HOME/wgw/app.env docker compose -p wgw up -d --pull never`
+  TELEMETRY_RECORD=1 ENV_FILE=$HOME/wgw/app.env docker compose -p wgw-web up -d --pull never`
   (the previous image must still be local; the deployer keeps the 3 newest). Then `rm ~/wgw/last-deployed*` so the
   timer does not immediately redeploy the newest build.
-- List what ran when: `docker inspect wgw-app-1 --format '{{.Config.Image}} {{.State.StartedAt}}'`.
+- List what ran when: `docker inspect wgw-web-app-1 --format '{{.Config.Image}} {{.State.StartedAt}}'`.
 - Pause deploys: `sudo systemctl stop water-gate-deploy.timer`.
 - A crashed run leaves `~/wgw/.deploy.lock`; the next run takes over when its pid is dead.
 

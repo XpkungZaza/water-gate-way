@@ -20,7 +20,9 @@ SMOKE_PORT="${SMOKE_PORT:-3100}"
 LIVE_PORT="${LIVE_PORT:-3000}"
 KEEP_IMAGES="${KEEP_IMAGES:-3}"
 HEALTH_TRIES="${HEALTH_TRIES:-30}"
-LIVE_PROJECT="${LIVE_PROJECT:-wgw}"
+# WHY not `wgw`: the existing Postgres compose project is already named wgw; sharing it makes compose treat the
+# database as an orphan of this one (and `down --remove-orphans` would remove it).
+LIVE_PROJECT="${LIVE_PROJECT:-wgw-web}"
 CAND_PROJECT="${CAND_PROJECT:-wgw-candidate}"
 LIVE_CONTAINER="$LIVE_PROJECT-app-1"
 
@@ -75,7 +77,7 @@ new_ref="$IMAGE@$digest"
 docker pull "$new_ref" >/dev/null || die "docker pull failed for $digest"
 
 # dc <project> <image> <host port> <record telemetry 0|1> <compose args...>
-# Hardening (loopback-only publish, read-only rootfs, cap_drop ALL, no-new-privileges, 256 MB) lives in the compose file.
+# Hardening (loopback-only bind, read-only rootfs, cap_drop ALL, no-new-privileges, 256 MB) lives in the compose file.
 # --pull never on `up`: the image was just pulled by digest, and a rollback target must come from the local cache.
 dc() {
   local project="$1" image="$2" port="$3" record="$4"
