@@ -22,6 +22,8 @@ export type DeviceSwitchProps = {
   tone?: "on" | "warn" | "danger";
   /** Read-only: render the same row and state readout without any command buttons or notes. */
   readOnly?: boolean;
+  /** A line under the row explaining why it has no buttons (e.g. the firmware owns this output). */
+  note?: string;
 };
 
 /** Phase of the last command for one row, shown in the reserved status line. */
@@ -100,6 +102,7 @@ export default function DeviceSwitch({
   onSend,
   tone = "on",
   readOnly = false,
+  note,
 }: DeviceSwitchProps) {
   const view = deviceView(state, stale);
   // WHY: lock only while this row's own command is on the wire; confirmation is tracked by the status line.
@@ -173,6 +176,8 @@ export default function DeviceSwitch({
           </div>
         )}
       </div>
+
+      {note && <p className="mt-1.5 pl-[3.25rem] text-sm text-muted">{note}</p>}
 
       {/* Reserved status line: always rendered at one fixed height, empty when idle. */}
       {!readOnly && (

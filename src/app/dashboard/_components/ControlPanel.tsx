@@ -186,7 +186,18 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
     { key: "alarm", name: "สัญญาณเตือน", icon: Bell, onCmd: "A1", offCmd: "A0", state: devices?.alarm ?? null, tone: "danger" },
     { key: "light", name: "ไฟส่องสว่าง", icon: Lightbulb, onCmd: "L1", offCmd: "L0", state: devices?.light ?? null, tone: "warn" },
     { key: "relay1", name: "ปั๊ม IoT 1", icon: Power, onCmd: "R1", offCmd: "R0", state: devices?.relay1 ?? null, tone: "on" },
-    { key: "relay2", name: "ปั๊ม IoT 2", icon: Power, onCmd: "Q1", offCmd: "Q0", state: devices?.relay2 ?? null, tone: "on" },
+    {
+      key: "relay2",
+      // WHY: Q is the controller's master relay M2, not a pump. The Pi traces show M1 and M2 always switch
+      // together and stay on in every mode except OFF, so a Q0 is accepted but never takes effect.
+      name: "รีเลย์หลัก 2",
+      icon: Power,
+      onCmd: "Q1",
+      offCmd: "Q0",
+      state: devices?.relay2 ?? null,
+      tone: "on",
+      locked: "ควบคุมโดยระบบ ปิดได้ผ่านโหมดปิดระบบเท่านั้น",
+    },
   ] as const;
 
   const statusOf = (key: Key): SwitchStatus | null => {
@@ -274,7 +285,8 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
             status={readOnly ? null : statusOf(row.key)}
             onSend={guardedSend}
             tone={row.tone}
-            readOnly={readOnly}
+            readOnly={readOnly || "locked" in row}
+            note={"locked" in row ? row.locked : undefined}
           />
         ))}
       </div>
