@@ -1,0 +1,21 @@
+# Keeps the live app container present after a reboot. Installed once as
+# /etc/systemd/system/water-gate.service (needs sudo). The container itself is created by
+# pull-deploy.sh with --restart unless-stopped, so the Docker daemon normally brings it back
+# before this unit runs; this unit is the belt-and-braces start if the container was removed
+# or is stopped. Replaces the old unit that ran `next start` from ~/wgw/current.
+[Unit]
+Description=Water Gate Way app container
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cmmc
+Environment=HOME=/home/cmmc
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'docker inspect wgw-live >/dev/null 2>&1 && docker start wgw-live || /home/cmmc/wgw/deploy/pull-deploy.sh'
+ExecStop=/usr/bin/docker stop wgw-live
+
+[Install]
+WantedBy=multi-user.target

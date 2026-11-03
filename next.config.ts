@@ -20,6 +20,10 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // WHY: the deployable is a Docker image (deploy/pull/); standalone emits .next/standalone with only the
+  // traced prod runtime files, so the image needs no node_modules copy and no npm on the droplet.
+  // headers() (CSP etc.) still apply: they are served by the standalone server like any other Next start.
+  output: "standalone",
   // WHY: the app never uses next/image, and /_next/image is a public, unauthenticated endpoint (the proxy
   // matcher skips it) that carried unauthenticated RCE advisories up to 16.4.0. With this set the server
   // answers 404 there (next-server.js: `imagesConfig.unoptimized` -> render404), so nothing is decoded.

@@ -54,45 +54,61 @@ jobs:
       - run: npm audit --audit-level=high
 
   # CD, build half. The droplet is Tailscale-only (a GitHub-hosted runner cannot reach it) and has ~450 MB RAM,
-  # so Actions builds once and publishes a checksummed artifact; deploy/pull/pull-deploy.sh on the droplet pulls it.
+  # so Actions builds the image and pushes it to GHCR; deploy/pull/pull-deploy.sh on the droplet pulls it.
   # Only after test, typecheck, lint, build and audit all passed, and only for main.
   release:
-    name: Publish build artifact
+    name: Build and push image to GHCR
     needs: [verify, audit]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
+      # WHY packages: write — push to ghcr.io and delete superseded image versions. Nothing else is elevated.
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+      TAG: sha-${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run build
-      # WHY prune: the droplet cannot run npm; the artifact carries production dependencies only.
-      - run: npm prune --omit=dev --ignore-scripts --no-audit --no-fund
-      # Boot the pruned build once; a missing runtime dependency fails here, not on the droplet.
-      - name: Smoke test pruned build
+      - name: Log in to GHCR
+        # WHY the short-lived job token, not a PAT: scope is this one run; no deploy key on the droplet is needed
+        # because the repo (and so the package) is public.
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build image (linux/amd64)
+        # WHY docker build, not buildx/multi-arch: the droplet is x64; one platform keeps the build small and fast.
+        run: docker build --platform linux/amd64 -t "$IMAGE:$TAG" -t "$IMAGE:main" .
+      - name: Smoke-run the built image
         run: |
-          node_modules/.bin/next start -H 127.0.0.1 -p 3100 > smoke.log 2>&1 &
+          docker run -d --name smoke -p 127.0.0.1:3100:3000 "$IMAGE:$TAG"
+          trap 'docker rm -f smoke >/dev/null 2>&1 || true' EXIT
           for i in $(seq 1 30); do
             [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)" = 200 ] && exit 0
             sleep 1
           done
-          cat smoke.log; exit 1
-      - name: Package
+          docker logs smoke; exit 1
+      - name: Push image
         run: |
-          tar --exclude=.next/cache --exclude=.next/dev -czf "wgw-$GITHUB_SHA.tar.gz" \
-            .next public package.json package-lock.json next.config.ts node_modules
-          sha256sum "wgw-$GITHUB_SHA.tar.gz" > "wgw-$GITHUB_SHA.tar.gz.sha256"
-      - name: Publish release
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:main"
+      # WHY prune here and not by a retention policy: GHCR keeps every pushed tag forever otherwise, and the
+      # package API lets us keep exactly the newest 10 sha-* versions plus drop untagged leftovers.
+      - name: Prune old GHCR versions (keep 10 newest sha-*)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "build-$GITHUB_SHA" "wgw-$GITHUB_SHA.tar.gz" "wgw-$GITHUB_SHA.tar.gz.sha256" \
-            --target "$GITHUB_SHA" --title "build $GITHUB_SHA" --notes "Built from $GITHUB_SHA. Deployed by the droplet pull timer." --latest
+          pkg="${GITHUB_REPOSITORY#*/}"
+          gh api --paginate "/user/packages/container/$pkg/versions?per_page=100" > versions.json
+          jq -s 'add | sort_by(.created_at) | reverse' versions.json > sorted.json
+          # Keep: versions that still carry the rolling `main` tag. Delete: untagged (untagged-by-prune) and
+          # every sha-* version beyond the 10 newest.
+          jq -r '.[] | select((.metadata.container.tags | index("main") | not) and
+                 ((.metadata.container.tags | any(startswith("sha-"))) | not)) | "\(.id) untagged"' sorted.json
+          jq -r '[.[] | select(.metadata.container.tags | any(startswith("sha-")))] | .[10:][] | "\(.id) old-sha"' sorted.json
+          jq -r '.[] | select((.metadata.container.tags | index("main") | not) and
+                 ((.metadata.container.tags | any(startswith("sha-"))) | not)) | .id' sorted.json |
+            while read -r id; do gh api -X DELETE "/user/packages/container/$pkg/versions/$id" || true; done
+          jq -r '[.[] | select(.metadata.container.tags | any(startswith("sha-")))] | .[10:][] | .id' sorted.json |
+            while read -r id; do gh api -X DELETE "/user/packages/container/$pkg/versions/$id" || true; done

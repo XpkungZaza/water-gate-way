@@ -1,33 +1,32 @@
 #!/usr/bin/env bash
-# Pull deployer: runs on the droplet as cmmc (systemd timer). Fetches the newest build release from GitHub,
-# verifies its checksum, smoke-tests it on loopback, switches `current`, restarts water-gate, and rolls back
-# on a failed health check. It never runs migrations (db/migrations stay a manual, approved step).
-# WHY pull: the droplet has no inbound SSH from CI and no deploy key in GitHub secrets.
-# WHY no build here: the droplet has ~450 MB free and no swap; `npm ci` was OOM-killed before (see deploy runbook).
+# Pull deployer (Docker image flow): runs on the droplet as cmmc (systemd timer). Finds the newest successful
+# main build, resolves its GHCR digest, pulls by digest, smoke-tests it on 127.0.0.1:3100, switches the live
+# container, health-checks :3000, and rolls back to the previous image on failure. It never runs migrations.
+# WHY pull: the droplet has no inbound SSH from CI and no deploy key in GitHub; the repo (and package) is public.
+# WHY no build here: the droplet has ~450 MB RAM and no swap.
 set -euo pipefail
 
 REPO="${REPO:-leotawee/water-gate-way}"
-API="${RELEASE_API:-https://api.github.com/repos/$REPO/releases/latest}"
+IMAGE="${IMAGE:-ghcr.io/leotawee/water-gate-way}"
+RUNS_API="${RUNS_API:-https://api.github.com/repos/$REPO/actions/runs?branch=main&conclusion=success&per_page=1}"
 ROOT="${WGW_ROOT:-$HOME/wgw}"
-RELEASES="$ROOT/releases"
-CURRENT="$ROOT/current"
 STATE="$ROOT/last-deployed"
+STATE_DIGEST="$ROOT/last-deployed.digest"
 ENV_FILE="${ENV_FILE:-$ROOT/app.env}"
 SMOKE_PORT="${SMOKE_PORT:-3100}"
 LIVE_PORT="${LIVE_PORT:-3000}"
-KEEP=5
-# WHY overridable: tests replace these with a fake app and fake release.
-START_CMD="${START_CMD:-node_modules/.bin/next start -H 127.0.0.1}"
-RESTART_CMD="${RESTART_CMD:-sudo -n /usr/bin/systemctl restart water-gate}"
+KEEP_IMAGES="${KEEP_IMAGES:-3}"
+HEALTH_TRIES="${HEALTH_TRIES:-30}"
+LIVE_NAME="${LIVE_NAME:-wgw-live}"
+CAND_NAME="${CAND_NAME:-wgw-candidate}"
 
 log() { printf '%s [deploy] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 die() { log "FAIL: $*"; exit 1; }
 
-command -v curl >/dev/null && command -v jq >/dev/null && command -v sha256sum >/dev/null || die "missing curl, jq or sha256sum"
-mkdir -p "$RELEASES"
+command -v curl jq docker >/dev/null || die "missing curl, jq or docker"
 
 # WHY lock dir + pid: a slow deploy must not overlap the next timer tick; mkdir is atomic and works without flock.
-# A lock whose pid is dead (crash, reboot mid-deploy) is stale and is taken over, so one crash cannot stop deploys.
+# A lock whose pid is dead (crash, reboot mid-deploy) is stale and is taken over.
 LOCK="$ROOT/.deploy.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   if kill -0 "$(cat "$LOCK/pid" 2>/dev/null)" 2>/dev/null; then log "another deploy running, skip"; exit 0; fi
@@ -36,95 +35,110 @@ fi
 echo $$ >"$LOCK/pid"
 trap 'rm -rf "$LOCK"' EXIT
 
-release_json="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$API")" || die "release API unreachable"
-tag="$(jq -r '.tag_name' <<<"$release_json")"
-[[ "$tag" =~ ^build-[0-9a-f]{40}$ ]] || die "unexpected tag: $tag"
-sha="${tag#build-}"
-
+# Newest successful CI run on main: its head sha is the image tag sha-<full sha> pushed by the release job.
+run_json="$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$RUNS_API")" || die "runs API unreachable"
+sha="$(jq -r '.workflow_runs[0].head_sha // empty' <<<"$run_json")"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "no successful main run found"
+tag="sha-$sha"
 if [[ -f "$STATE" && "$(cat "$STATE")" == "$tag" ]]; then
   log "already deployed $tag"
   exit 0
 fi
 
-url_of() { jq -r --arg n "$1" '.assets[] | select(.name == $n) | .browser_download_url' <<<"$release_json"; }
-tar_url="$(url_of "wgw-$sha.tar.gz")"
-sum_url="$(url_of "wgw-$sha.tar.gz.sha256")"
-[[ -n "$tar_url" && -n "$sum_url" ]] || die "release $tag has no artifact pair"
+# Resolve the manifest digest anonymously (public package), then pull by digest: what was tested is exactly
+# what runs, even if the tag were moved later.
+tok="$(curl -fsS --max-time 20 "https://ghcr.io/token?scope=repository:$REPO:pull" | jq -r .token)" || die "ghcr token failed"
+digest="$(curl -fsS --max-time 20 -I \
+  -H "Authorization: Bearer $tok" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+  "https://ghcr.io/v2/$REPO/manifests/$tag" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2}')" || die "manifest lookup failed for $tag"
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "no digest for $tag"
 
-dir="$RELEASES/$tag"
-# A dir for this tag that is not live is a partial extract from a crashed run: discard it.
-[[ -e "$dir" && "$(readlink -f "$CURRENT")" == "$(readlink -f "$dir")" ]] && die "$tag is current but state file differs; fix by hand"
-rm -rf "$dir"
-stage="$RELEASES/.incoming-$tag"
-rm -rf "$stage" && mkdir -p "$stage"
-trap 'rm -rf "$stage" "$LOCK"' EXIT
-
-log "download $tag"
-curl -fsS --max-time 300 -o "$stage/wgw.tar.gz" "$tar_url"
-curl -fsS --max-time 20 -o "$stage/wgw.sha256" "$sum_url"
-# WHY: checksum from the same release is integrity only (a compromised release defeats it); GitHub release
-# assets over HTTPS are the trust root here. Verify before anything is extracted or executed.
-(cd "$stage" && sha256sum -c wgw.sha256 --quiet) || die "checksum mismatch for $tag"
-
-mkdir "$stage/app"
-tar -xzf "$stage/wgw.tar.gz" -C "$stage/app"
-mv "$stage/app" "$dir"
-
-# Health probe on loopback. Starts the new build on SMOKE_PORT with the real env, checks /login, stops it.
-probe() {
-  local pid
-  ( cd "$1" && set -a && . "$ENV_FILE" && set +a && PORT="$SMOKE_PORT" exec $START_CMD -p "$SMOKE_PORT" ) >"$stage/smoke.log" 2>&1 &
-  pid=$!
-  local code=000
-  for _ in $(seq 1 30); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SMOKE_PORT/login" || true)"
-    [[ "$code" == 200 ]] && break
-    sleep 1
-  done
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  [[ "$code" == 200 ]]
-}
-
-if ! probe "$dir"; then
-  log "smoke failed; log tail:"; tail -20 "$stage/smoke.log" >&2 || true
-  rm -rf "$dir"
-  die "release $tag rejected before switch; live app untouched"
+if [[ -f "$STATE_DIGEST" && "$(cat "$STATE_DIGEST")" == "$digest" ]]; then
+  log "already deployed $digest"; printf '%s\n' "$tag" >"$STATE"; exit 0
 fi
 
-previous=""
-[[ -L "$CURRENT" ]] && previous="$(readlink -f "$CURRENT")"
+docker pull "$IMAGE@$digest" >/dev/null || die "docker pull failed for $digest"
 
-# shortcut: ln -sfn is unlink+symlink, not a rename, so a reader can briefly see no `current`; systemd restarts right after.
-switch() { ln -sfn "$1" "$CURRENT"; }
+# Hardening shared by candidate and live: loopback-only publish, read-only rootfs with a /tmp tmpfs,
+# all capabilities dropped, no privilege escalation, 256 MB cap (droplet has ~450 MB, no swap).
+# The server binds 0.0.0.0 INSIDE the container; only the publish maps it to 127.0.0.1 on the host.
+# WHY host-gateway: the container is on the bridge network, so 127.0.0.1 inside it is NOT the host. If app.env
+# reaches host services by loopback, the owner must point it at host.docker.internal (documented in the README).
+start_container() { # name port restart-policy image
+  docker run -d --name "$1" \
+    --pull=never \
+    --env-file "$ENV_FILE" \
+    --publish "127.0.0.1:$2:3000" \
+    --read-only --tmpfs /tmp \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --memory 256m \
+    --add-host host.docker.internal:host-gateway \
+    --restart "$3" \
+    "$4"
+}
 
-switch "$dir"
-log "switched current -> $tag, restarting"
-$RESTART_CMD || { log "restart command failed"; }
-
-health_live() {
-  for _ in $(seq 1 20); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$LIVE_PORT/login" || true)" == 200 ]] && return 0
+health() {
+  local port="$1" code=000
+  for _ in $(seq 1 "$HEALTH_TRIES"); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/login" || true)"
+    [[ "$code" == 200 ]] && return 0
     sleep 1
   done
   return 1
 }
 
-if ! health_live; then
-  log "live health failed after switch; rolling back"
-  if [[ -n "$previous" ]]; then
-    switch "$previous"
-    $RESTART_CMD || true
-    health_live || log "rollback also unhealthy: check systemctl status water-gate"
-  fi
-  die "rolled back from $tag"
+# WHY host-gateway: the container is on the bridge network, so 127.0.0.1 inside it is NOT the host. If app.env
+# reaches host services by loopback, the owner must point it at host.docker.internal (documented in the README).
+prev_image=""
+if docker inspect "$LIVE_NAME" >/dev/null 2>&1; then
+  prev_image="$(docker inspect "$LIVE_NAME" --format '{{.Image}}')"
 fi
 
-printf '%s\n' "$tag" >"$STATE"
-log "live: $tag"
+# --- candidate on :3100 ---
+docker rm -f "$CAND_NAME" >/dev/null 2>&1 || true
+log "starting candidate $digest on 127.0.0.1:$SMOKE_PORT"
+start_container "$CAND_NAME" "$SMOKE_PORT" no "$IMAGE@$digest" >/dev/null || die "candidate run failed"
+if ! health "$SMOKE_PORT"; then
+  log "candidate unhealthy; log tail:"; docker logs --tail 20 "$CAND_NAME" >&2 || true
+  docker rm -f "$CAND_NAME" >/dev/null 2>&1 || true
+  die "candidate $digest rejected before switch; live container untouched"
+fi
+docker rm -f "$CAND_NAME" >/dev/null 2>&1 || true
 
-# Keep the newest $KEEP releases plus the live one (rollback is one symlink away).
-ls -1dt "$RELEASES"/build-* 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r old; do
-  [[ "$(readlink -f "$CURRENT")" == "$(readlink -f "$old")" ]] && continue
-  rm -rf "$old"
-done
+# --- switch live on :3000 (restart policy keeps it up across reboots along with water-gate.service) ---
+docker rm -f "$LIVE_NAME" >/dev/null 2>&1 || true
+log "switching live to $digest"
+if ! start_container "$LIVE_NAME" "$LIVE_PORT" unless-stopped "$IMAGE@$digest" >/dev/null; then
+  log "live run failed; rolling back"
+  if [[ -n "$prev_image" ]]; then
+    start_container "$LIVE_NAME" "$LIVE_PORT" unless-stopped "$prev_image" >/dev/null || true
+  fi
+  die "live container failed to start from $digest"
+fi
+
+if ! health "$LIVE_PORT"; then
+  log "live health failed after switch; rolling back"
+  docker rm -f "$LIVE_NAME" >/dev/null 2>&1 || true
+  if [[ -n "$prev_image" ]]; then
+    start_container "$LIVE_NAME" "$LIVE_PORT" unless-stopped "$prev_image" >/dev/null || true
+    if health "$LIVE_PORT"; then log "rolled back to $prev_image"; else log "rollback also unhealthy: check docker logs $LIVE_NAME"; fi
+  else
+    log "no previous image; nothing to roll back to"
+  fi
+  die "rolled back from $digest"
+fi
+
+printf '%s\n' "$digest" >"$STATE_DIGEST"
+printf '%s\n' "$tag" >"$STATE"
+log "live: $tag ($digest)"
+
+# Keep the $KEEP_IMAGES newest local images of this repo plus the running one; remove the rest.
+running="$(docker inspect "$LIVE_NAME" --format '{{.Image}}' 2>/dev/null || true)"
+docker images "$IMAGE" --format '{{.CreatedAt}}|{{.ID}}' 2>/dev/null | sort -r | tail -n +"$((KEEP_IMAGES + 1))" | cut -d'|' -f2 |
+  while read -r id; do
+    [[ -z "$id" || "$id" == "$running" ]] && continue
+    log "removing old image $id"
+    docker rmi -f "$id" >/dev/null 2>&1 || true
+  done

@@ -1,7 +1,7 @@
-# Oneshot run of pull-deploy.sh. Installed as a user-owned unit under /etc/systemd/system (needs sudo once).
+# Oneshot run of pull-deploy.sh. Installed as /etc/systemd/system/water-gate-deploy.service (needs sudo once).
 [Unit]
 Description=Water Gate Way pull deployer
-After=network-online.target
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
