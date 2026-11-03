@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, CircleAlert, Cpu, Fan, Hand, Lightbulb, Power, PowerOff } from "lucide-react";
+import { Bell, Cpu, Fan, Hand, Lightbulb, Power, PowerOff } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRedirectToLogin } from "@/hooks/useRedirectToLogin";
 import type { Command, ModeCommand } from "@/lib/control/commands";
 import { isModeCommand } from "@/lib/control/commands";
 import type { GateMode, GateStatus } from "@/lib/telemetry/parseStatus";
 import DeviceSwitch, { StatusLine, type SwitchStatus } from "@/components/DeviceSwitch";
+import Modal from "@/components/Modal";
 import { modeView } from "./modeView";
 
 type Devices = GateStatus["devices"];
@@ -81,6 +82,8 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
   const [notes, setNotes] = useState<Notes>({});
   const [error, setError] = useState<string | null>(null);
   const [askOff, setAskOff] = useState(false);
+  // A device command was tapped while the controller is in AUTO: ask before switching to MANUAL.
+  const [askManual, setAskManual] = useState(false);
   const redirectToLogin = useRedirectToLogin();
   // Commands go out one at a time, SEND_GAP_MS apart. WHY: tapping two devices quickly used to fail the
   // second with "too many commands"; now it waits its turn and its row shows the spinner meanwhile.
@@ -171,6 +174,13 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
     return () => timers.forEach(clearTimeout);
   }, [notes]);
 
+  // WHY: in AUTO the controller drives the devices itself, so a device tap would do nothing and look broken.
+  // Say so and offer the switch; an unknown mode (stale/missing) is not blocked, the server stays authoritative.
+  const guardedSend = (cmd: Command) => {
+    if (!isModeCommand(cmd) && !stale && mode === "AUTO") setAskManual(true);
+    else void sendCommand(cmd);
+  };
+
   const rows = [
     { key: "pump", name: "ปั๊มหลัก", icon: Fan, onCmd: "P1", offCmd: "P0", state: devices?.pump ?? null, tone: "on" },
     { key: "alarm", name: "สัญญาณเตือน", icon: Bell, onCmd: "A1", offCmd: "A0", state: devices?.alarm ?? null, tone: "danger" },
@@ -238,22 +248,6 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
               })}
             </div>
 
-            {askOff && (
-              <div role="alertdialog" aria-labelledby="off-q" className="anim-rise-in mt-3 rounded-xl bg-danger-soft p-3 text-sm">
-                <p id="off-q" className="font-bold text-danger">
-                  ปิดระบบอัตโนมัติ?
-                </p>
-                <div className="mt-2 flex gap-2">
-                  <button type="button" className="btn-danger min-h-11" onClick={() => void sendCommand("OFF")}>
-                    ยืนยันปิดระบบ
-                  </button>
-                  <button type="button" className="btn-secondary" onClick={() => setAskOff(false)}>
-                    ยกเลิก
-                  </button>
-                </div>
-              </div>
-            )}
-
             <p className="mt-2 flex min-h-5 items-center gap-2 text-sm" aria-live="polite">
               {modeStatus && (
                 <StatusLine
@@ -267,16 +261,6 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
         )}
       </div>
 
-      {!readOnly && error && (
-        <div
-          role="alert"
-          className="anim-rise-in mx-5 mt-3 flex items-center gap-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
-        >
-          <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-          {error}
-        </div>
-      )}
-
       <div className="divide-y divide-rule px-5">
         {rows.map((row) => (
           <DeviceSwitch
@@ -288,12 +272,48 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
             onCmd={row.onCmd}
             offCmd={row.offCmd}
             status={readOnly ? null : statusOf(row.key)}
-            onSend={sendCommand}
+            onSend={guardedSend}
             tone={row.tone}
             readOnly={readOnly}
           />
         ))}
       </div>
+
+      <Modal
+        open={askManual}
+        tone="warn"
+        title="ตอนนี้อยู่โหมดอัตโนมัติ"
+        onClose={() => setAskManual(false)}
+        confirm={{
+          label: "สลับเป็นควบคุมเอง",
+          onConfirm: () => {
+            setAskManual(false);
+            void sendCommand("MANUAL");
+          },
+        }}
+      >
+        ระบบควบคุมอุปกรณ์เองอยู่ จึงสั่งปั๊มหรืออุปกรณ์จากหน้านี้ไม่ได้ สลับเป็นโหมดควบคุมเองหรือไม่? เมื่อสลับแล้วให้กดสั่งอุปกรณ์อีกครั้ง
+      </Modal>
+
+      <Modal
+        open={askOff}
+        tone="danger"
+        title="ปิดระบบอัตโนมัติ?"
+        onClose={() => setAskOff(false)}
+        confirm={{
+          label: "ยืนยันปิดระบบ",
+          onConfirm: () => {
+            setAskOff(false);
+            void sendCommand("OFF");
+          },
+        }}
+      >
+        ระบบจะหยุดควบคุมปั๊มตามระดับน้ำจนกว่าจะสลับกลับเป็นอัตโนมัติหรือควบคุมเอง
+      </Modal>
+
+      <Modal open={error !== null} tone="danger" title="ส่งคำสั่งไม่สำเร็จ" onClose={() => setError(null)}>
+        {error}
+      </Modal>
     </section>
   );
 }

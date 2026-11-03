@@ -1,13 +1,13 @@
 "use client";
 
-import { useActionState, type ReactNode } from "react";
-import { CircleAlert } from "lucide-react";
+import { useActionState, useRef, useState, type ReactNode } from "react";
+import Modal from "@/components/Modal";
 import type { AdminState } from "../actions";
 
 type Action = (prev: AdminState, form: FormData) => Promise<AdminState>;
 
-/** A form bound to a Server Action that shows the action's { error } inline (same pattern as LoginForm).
- *  `confirm` (when set) asks for confirmation before submitting; cancelling prevents the submit. */
+/** A form bound to a Server Action that shows the action's { error } in a modal (same pattern as LoginForm).
+ *  `confirm` (when set) asks for confirmation in a modal before submitting; cancelling prevents the submit. */
 export default function ActionForm({
   action,
   className,
@@ -20,21 +20,55 @@ export default function ActionForm({
   confirm?: string;
 }) {
   const [state, formAction] = useActionState(action, undefined);
+  const formRef = useRef<HTMLFormElement>(null);
+  // WHY: set right before requestSubmit() so the onSubmit below lets exactly that one submit through.
+  const confirmed = useRef(false);
+  const [asking, setAsking] = useState(false);
+  // WHY: keyed to the state object, not the text, so the same error again after a dismiss reopens the modal.
+  const [dismissed, setDismissed] = useState<unknown>(null);
+
   return (
-    <form
-      action={formAction}
-      className={className}
-      onSubmit={(e) => {
-        if (confirm && !window.confirm(confirm)) e.preventDefault();
-      }}
-    >
-      {children}
-      {state?.error && (
-        <p role="alert" className="col-span-full flex items-center gap-2 text-sm font-medium text-danger">
-          <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-          {state.error}
-        </p>
+    <>
+      <form
+        ref={formRef}
+        action={formAction}
+        className={className}
+        onSubmit={(e) => {
+          if (!confirm) return;
+          if (confirmed.current) {
+            confirmed.current = false;
+            return;
+          }
+          e.preventDefault();
+          setAsking(true);
+        }}
+      >
+        {children}
+      </form>
+      {confirm && (
+        <Modal
+          open={asking}
+          onClose={() => setAsking(false)}
+          title={confirm}
+          tone="danger"
+          confirm={{
+            label: "ยืนยัน",
+            onConfirm: () => {
+              confirmed.current = true;
+              formRef.current?.requestSubmit();
+              setAsking(false);
+            },
+          }}
+        />
       )}
-    </form>
+      <Modal
+        open={!!state?.error && dismissed !== state}
+        onClose={() => setDismissed(state)}
+        title="ดำเนินการไม่สำเร็จ"
+        tone="danger"
+      >
+        {state?.error}
+      </Modal>
+    </>
   );
 }

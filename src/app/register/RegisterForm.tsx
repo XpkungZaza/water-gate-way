@@ -1,9 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { CircleAlert } from "lucide-react";
 import { register, type RegisterState } from "./actions";
 import PasswordField from "@/components/PasswordField";
+import Modal from "@/components/Modal";
 
 function message(state: RegisterState): string | null {
   switch (state?.error) {
@@ -25,6 +25,8 @@ export default function RegisterForm() {
   // WHY: controlled, so React's reset after the action leaves the email in place; the passwords clear.
   const [email, setEmail] = useState("");
   const error = message(state);
+  // WHY: keyed to the state object, not the text, so the same error again after a dismiss reopens the modal.
+  const [dismissed, setDismissed] = useState<unknown>(null);
 
   return (
     <form action={action} className="space-y-5">
@@ -78,15 +80,17 @@ export default function RegisterForm() {
           invalid={state?.error === "mismatch"}
         />
       </div>
-      {error && (
-        <p key={error} role="alert" className="anim-rise-in flex items-center gap-2 text-sm font-bold text-danger">
-          <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-          {error}
-        </p>
-      )}
       <button type="submit" disabled={pending} aria-busy={pending} className="btn-primary w-full">
         {pending ? "กำลังสมัคร…" : "สมัครใช้งาน"}
       </button>
+      <Modal
+        open={!!error && dismissed !== state}
+        onClose={() => setDismissed(state)}
+        title="สมัครใช้งานไม่สำเร็จ"
+        tone="danger"
+      >
+        {error}
+      </Modal>
     </form>
   );
 }

@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
-import { CircleAlert } from "lucide-react";
+import { useActionState, useState } from "react";
 import { signIn } from "./actions";
 import PasswordField from "@/components/PasswordField";
+import Modal from "@/components/Modal";
 
 const MESSAGES = {
   invalid: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
@@ -13,6 +13,10 @@ const MESSAGES = {
 export default function LoginForm({ next }: { next: string }) {
   const [state, action, pending] = useActionState(signIn, undefined);
   const error = state?.error ? MESSAGES[state.error] : null;
+  // WHY: keyed to the state object, not the text, so the same error again after a dismiss reopens the modal.
+  const [dismissed, setDismissed] = useState<unknown>(null);
+  // WHY: controlled, so React's form reset after the action keeps the email (as in RegisterForm); only the password clears.
+  const [email, setEmail] = useState("");
 
   return (
     <form action={action} className="space-y-5">
@@ -24,6 +28,8 @@ export default function LoginForm({ next }: { next: string }) {
         <input
           id="email"
           name="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           type="email"
           autoComplete="email"
           inputMode="email"
@@ -45,15 +51,17 @@ export default function LoginForm({ next }: { next: string }) {
       <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-fg">
         <input type="checkbox" name="remember" id="remember" className="size-4 accent-fg" /> จดจำฉันไว้ในอุปกรณ์นี้ 30 วัน
       </label>
-      {error && (
-        <p key={error} role="alert" className="anim-rise-in flex items-center gap-2 text-sm font-bold text-danger">
-          <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-          {error}
-        </p>
-      )}
       <button type="submit" disabled={pending} aria-busy={pending} className="btn-primary w-full">
         {pending ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
       </button>
+      <Modal
+        open={!!error && dismissed !== state}
+        onClose={() => setDismissed(state)}
+        title="เข้าสู่ระบบไม่สำเร็จ"
+        tone="danger"
+      >
+        {error}
+      </Modal>
     </form>
   );
 }
