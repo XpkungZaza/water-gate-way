@@ -19,6 +19,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone demo workspace (its Python venv ships JS bundles that are not ours to lint).
+    "demo/**",
   ]),
 ]);
 

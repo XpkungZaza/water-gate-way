@@ -16,6 +16,9 @@ type State = {
 };
 
 const DEFAULT_TOPIC = "stm32/status/all";
+// WHY: the Pi's YOLO person detector publishes its debounced count here instead of riding
+// stm32/status/all, so it can never overwrite the real device status (messages replace s.last).
+const PERSON_TOPIC = "water/gate/person";
 const MAX_PAYLOAD = 64 * 1024;
 const WARN_EVERY_MS = 60_000;
 const PUBLISH_TIMEOUT_MS = 5_000;
@@ -40,6 +43,39 @@ function setConn(s: State, conn: ConnState) {
 }
 
 // WHY: never echo the payload; it is untrusted and may be large.
+// WHY not recordLevel here: person messages can arrive every few seconds; recording the merged
+// status would duplicate water-level rows between real radar readings. Detection only mutates
+// personCount, never the level source.
+function personCountFrom(payload: Buffer): number | null {
+  if (payload.length > MAX_PAYLOAD) return null;
+  try {
+    const o: unknown = JSON.parse(payload.toString("utf8"));
+    if (typeof o !== "object" || o === null || Array.isArray(o)) return null;
+    const v = (o as { person_count?: unknown }).person_count;
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v === "string" && v.trim() !== "") {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function applyPerson(s: State, payload: Buffer) {
+  const n = personCountFrom(payload);
+  if (n === null) return;
+  // Merge into the last real status instead of replacing it; with no status yet, start one that
+  // carries only the detection (everything else null until the first real status arrives).
+  const merged = s.last
+    ? { ...s.last, personCount: n, receivedAt: new Date().toISOString() }
+    : parseStatus({ person_count: n }, new Date());
+  if (!merged) return;
+  s.last = merged;
+  emit(s, { type: "status", status: merged });
+}
+
 function warnBadPayload(s: State, topic: string) {
   const now = Date.now();
   if (now - s.lastWarn < WARN_EVERY_MS) return;
@@ -63,7 +99,7 @@ function start(s: State) {
   s.client = client;
 
   const extra = process.env.MQTT_TOPIC_STATUS;
-  const topics = extra && extra !== DEFAULT_TOPIC ? [DEFAULT_TOPIC, extra] : [DEFAULT_TOPIC];
+  const topics = [...new Set([DEFAULT_TOPIC, PERSON_TOPIC, ...(extra && extra !== DEFAULT_TOPIC ? [extra] : [])])];
 
   client.on("connect", () => {
     setConn(s, "connected");
@@ -79,6 +115,7 @@ function start(s: State) {
     setConn(s, "disconnected");
   });
   client.on("message", (topic, payload) => {
+    if (topic === PERSON_TOPIC) return applyPerson(s, payload);
     let status: GateStatus | null = null;
     if (payload.length <= MAX_PAYLOAD) {
       try {

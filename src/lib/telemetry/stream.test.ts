@@ -70,14 +70,15 @@ describe("broker", () => {
     expect(h.clients).toHaveLength(1);
     expect(client().url).toBe("mqtt://127.0.0.1:1883");
     expect(client().opts).toMatchObject({ username: "nextjs", password: "pw-not-logged" });
-    expect(client().subscribe).toHaveBeenCalledWith(["stm32/status/all", "water/gate/status"], expect.anything());
+    expect(client().subscribe).toHaveBeenCalledWith(
+      ["stm32/status/all", "water/gate/person", "water/gate/status"], expect.anything());
   });
 
   it("does not subscribe MQTT_TOPIC_STATUS twice when equal to the default", () => {
     vi.stubEnv("MQTT_TOPIC_STATUS", "stm32/status/all");
     subscribeStatus(() => {});
     client().emit("connect");
-    expect(client().subscribe).toHaveBeenCalledWith(["stm32/status/all"], expect.anything());
+    expect(client().subscribe).toHaveBeenCalledWith(["stm32/status/all", "water/gate/person"], expect.anything());
   });
 
   it('stream emits {type:"conn", state:"disconnected"} when the client emits offline', () => {
@@ -158,6 +159,58 @@ describe("broker", () => {
     client().emit("connect");
     msg(VALID);
     expect(got.map((e) => e.type)).toEqual(["conn", "conn", "status"]);
+  });
+
+  it("person message merges into the last real status, not replacing it", () => {
+    const got: StatusEvent[] = [];
+    subscribeStatus((e) => got.push(e));
+    msg(VALID);
+    vi.mocked(recordLevel).mockClear();
+    msg(JSON.stringify({ person_count: 2, stable: true, source: "pi_yolo" }), "water/gate/person");
+    const st = got.filter((e) => e.type === "status");
+    expect(st).toHaveLength(2);
+    const merged = st[1].type === "status" ? st[1].status : null;
+    // personCount updated; the fields from the real status survive the merge
+    expect(merged && merged.personCount).toBe(2);
+    expect(merged && merged.pzem.voltage).toBe(230);
+    expect(merged && merged.devices.pump).toBe(true);
+    // detection-only updates must not write water-level rows
+    expect(recordLevel).not.toHaveBeenCalled();
+  });
+
+  it("person message with no prior status starts a detection-only status", () => {
+    const got: StatusEvent[] = [];
+    subscribeStatus((e) => got.push(e));
+    msg(JSON.stringify({ person_count: 1 }), "water/gate/person");
+    const st = got.filter((e) => e.type === "status");
+    expect(st).toHaveLength(1);
+    const s = st[0].type === "status" ? st[0].status : null;
+    expect(s && s.personCount).toBe(1);
+    expect(s && s.pzem.voltage).toBe(null);
+    expect(recordLevel).not.toHaveBeenCalled();
+  });
+
+  it("invalid person payloads are ignored", () => {
+    const got: StatusEvent[] = [];
+    subscribeStatus((e) => got.push(e));
+    msg("{not json", "water/gate/person");
+    msg(JSON.stringify({ no_count: 1 }), "water/gate/person");
+    msg(JSON.stringify({ person_count: "abc" }), "water/gate/person");
+    msg("[1,2]", "water/gate/person");
+    expect(got.filter((e) => e.type === "status")).toHaveLength(0);
+  });
+
+  it("a later real status replaces the merged one, then person merges again", () => {
+    const got: StatusEvent[] = [];
+    subscribeStatus((e) => got.push(e));
+    msg(VALID);
+    msg(JSON.stringify({ person_count: 3 }), "water/gate/person");
+    msg(VALID);
+    const st = got.filter((e) => e.type === "status");
+    expect(st).toHaveLength(3);
+    const last = st[2].type === "status" ? st[2].status : null;
+    // plain status has no person_count field, so the count resets until the detector publishes again
+    expect(last && last.personCount).toBe(null);
   });
 
   it("MQTT_URL unset -> disconnected, no client, password never logged", () => {
