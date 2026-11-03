@@ -18,6 +18,12 @@ without any GitHub login and there is no deploy key in GitHub.
 Not automated, by design: database migrations (`db/migrations/*.sql`). Run them by hand before merging code that
 needs them, with `psql -1` and `PGOPTIONS='-c search_path=wgw,public'`. The deployer never touches the database.
 
+## One-time GHCR step (owner)
+
+GHCR creates new packages **private**. After the first `release` run on `main`, open GitHub -> your profile ->
+Packages -> `water-gate-way` -> Package settings -> Change visibility -> Public. Until then the droplet gets 401
+on the anonymous token/pull and the deployer logs `FAIL`.
+
 ## One-time droplet setup (owner, needs sudo)
 
 1. Install Docker and `jq` + `curl` (`sudo apt install docker.io jq curl`, then `sudo usermod -aG docker cmmc`

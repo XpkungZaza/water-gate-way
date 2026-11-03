@@ -16,6 +16,8 @@ COPY . .
 RUN npm run build
 
 FROM node:20.20.2-bookworm-slim AS runner
+# WHY: links the GHCR package to this repo so the Actions GITHUB_TOKEN can push and delete its versions.
+LABEL org.opencontainers.image.source="https://github.com/leotawee/water-gate-way"
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

@@ -100,7 +100,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           pkg="${GITHUB_REPOSITORY#*/}"
-          gh api --paginate "/user/packages/container/$pkg/versions?per_page=100" > versions.json
+          # WHY /users/<owner>: GITHUB_TOKEN has no authenticated user, so /user/... returns 403.
+          base="/users/$GITHUB_REPOSITORY_OWNER/packages/container/$pkg/versions"
+          gh api --paginate "$base?per_page=100" > versions.json
           jq -s 'add | sort_by(.created_at) | reverse' versions.json > sorted.json
           # Keep: versions that still carry the rolling `main` tag. Delete: untagged (untagged-by-prune) and
           # every sha-* version beyond the 10 newest.
@@ -109,6 +111,6 @@ jobs:
           jq -r '[.[] | select(.metadata.container.tags | any(startswith("sha-")))] | .[10:][] | "\(.id) old-sha"' sorted.json
           jq -r '.[] | select((.metadata.container.tags | index("main") | not) and
                  ((.metadata.container.tags | any(startswith("sha-"))) | not)) | .id' sorted.json |
-            while read -r id; do gh api -X DELETE "/user/packages/container/$pkg/versions/$id" || true; done
+            while read -r id; do gh api -X DELETE "$base/$id" || echo "prune: could not delete version $id"; done
           jq -r '[.[] | select(.metadata.container.tags | any(startswith("sha-")))] | .[10:][] | .id' sorted.json |
-            while read -r id; do gh api -X DELETE "/user/packages/container/$pkg/versions/$id" || true; done
+            while read -r id; do gh api -X DELETE "$base/$id" || echo "prune: could not delete version $id"; done
