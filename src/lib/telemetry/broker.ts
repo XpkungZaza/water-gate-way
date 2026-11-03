@@ -13,6 +13,8 @@ type State = {
   last: GateStatus | null;
   listeners: Set<Listener>;
   lastWarn: number;
+  /** Latest person count from the detector and when it arrived (ms); never part of `last`'s freshness. */
+  person: { n: number; at: number } | null;
 };
 
 const DEFAULT_TOPIC = "stm32/status/all";
@@ -20,6 +22,8 @@ const DEFAULT_TOPIC = "stm32/status/all";
 // stm32/status/all, so it can never overwrite the real device status (messages replace s.last).
 const PERSON_TOPIC = "water/gate/person";
 const MAX_PAYLOAD = 64 * 1024;
+// A detector count older than this is not shown (the detector may have died; the STM32 status keeps flowing).
+const PERSON_MAX_AGE_MS = 30_000;
 const WARN_EVERY_MS = 60_000;
 const PUBLISH_TIMEOUT_MS = 5_000;
 
@@ -66,14 +70,20 @@ function personCountFrom(payload: Buffer): number | null {
 function applyPerson(s: State, payload: Buffer) {
   const n = personCountFrom(payload);
   if (n === null) return;
-  // Merge into the last real status instead of replacing it; with no status yet, start one that
-  // carries only the detection (everything else null until the first real status arrives).
-  const merged = s.last
-    ? { ...s.last, personCount: n, receivedAt: new Date().toISOString() }
-    : parseStatus({ person_count: n }, new Date());
-  if (!merged) return;
+  s.person = { n, at: Date.now() };
+  // WHY: no status yet -> nothing to show; the count is merged into the first real status.
+  if (!s.last) return;
+  // WHY: receivedAt is deliberately NOT touched. It means "when the STM32 last reported", and isStale()
+  // trusts it; a detector message must never make a dead device look fresh.
+  const merged = { ...s.last, personCount: n };
   s.last = merged;
   emit(s, { type: "status", status: merged });
+}
+
+/** A real status carries no person count; add the detector's latest while it is still fresh. */
+function withPerson(s: State, status: GateStatus): GateStatus {
+  if (status.personCount !== null || !s.person) return status;
+  return Date.now() - s.person.at <= PERSON_MAX_AGE_MS ? { ...status, personCount: s.person.n } : status;
 }
 
 function warnBadPayload(s: State, topic: string) {
@@ -125,6 +135,7 @@ function start(s: State) {
       }
     }
     if (!status) return warnBadPayload(s, topic);
+    status = withPerson(s, status);
     s.last = status;
     void recordLevel(status);
     emit(s, { type: "status", status });
@@ -138,7 +149,7 @@ export function startTelemetry(): void {
 
 function state(): State {
   if (!g.__wgTelemetry) {
-    const s: State = { client: null, conn: "disconnected", last: null, listeners: new Set(), lastWarn: -Infinity };
+    const s: State = { client: null, conn: "disconnected", last: null, listeners: new Set(), lastWarn: -Infinity, person: null };
     g.__wgTelemetry = s;
     start(s);
   }

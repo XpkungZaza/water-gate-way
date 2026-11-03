@@ -178,16 +178,36 @@ describe("broker", () => {
     expect(recordLevel).not.toHaveBeenCalled();
   });
 
-  it("person message with no prior status starts a detection-only status", () => {
+  it("a person message never refreshes receivedAt (a dead device must not look fresh)", () => {
+    vi.useFakeTimers();
+    try {
+      const got: StatusEvent[] = [];
+      subscribeStatus((e) => got.push(e));
+      msg(VALID);
+      const first = got.filter((e) => e.type === "status")[0];
+      const at0 = first.type === "status" ? first.status.receivedAt : "";
+      vi.advanceTimersByTime(20_000);
+      msg(JSON.stringify({ person_count: 2 }), "water/gate/person");
+      const merged = got.filter((e) => e.type === "status")[1];
+      expect(merged.type === "status" && merged.status.receivedAt).toBe(at0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("person message with no prior status emits nothing; the count joins the first real status", () => {
+    vi.mocked(recordLevel).mockClear();
     const got: StatusEvent[] = [];
     subscribeStatus((e) => got.push(e));
     msg(JSON.stringify({ person_count: 1 }), "water/gate/person");
+    expect(got.filter((e) => e.type === "status")).toHaveLength(0);
+    msg(VALID);
     const st = got.filter((e) => e.type === "status");
     expect(st).toHaveLength(1);
     const s = st[0].type === "status" ? st[0].status : null;
     expect(s && s.personCount).toBe(1);
-    expect(s && s.pzem.voltage).toBe(null);
-    expect(recordLevel).not.toHaveBeenCalled();
+    expect(s && s.pzem.voltage).toBe(230);
+    expect(recordLevel).toHaveBeenCalledTimes(1);
   });
 
   it("invalid person payloads are ignored", () => {
@@ -200,17 +220,22 @@ describe("broker", () => {
     expect(got.filter((e) => e.type === "status")).toHaveLength(0);
   });
 
-  it("a later real status replaces the merged one, then person merges again", () => {
-    const got: StatusEvent[] = [];
-    subscribeStatus((e) => got.push(e));
-    msg(VALID);
-    msg(JSON.stringify({ person_count: 3 }), "water/gate/person");
-    msg(VALID);
-    const st = got.filter((e) => e.type === "status");
-    expect(st).toHaveLength(3);
-    const last = st[2].type === "status" ? st[2].status : null;
-    // plain status has no person_count field, so the count resets until the detector publishes again
-    expect(last && last.personCount).toBe(null);
+  it("a later real status keeps a fresh person count, and drops it once the detector went quiet", () => {
+    vi.useFakeTimers();
+    try {
+      const got: StatusEvent[] = [];
+      subscribeStatus((e) => got.push(e));
+      msg(VALID);
+      msg(JSON.stringify({ person_count: 3 }), "water/gate/person");
+      vi.advanceTimersByTime(10_000);
+      msg(VALID);
+      vi.advanceTimersByTime(25_000); // 35 s since the detector spoke
+      msg(VALID);
+      const counts = got.filter((e) => e.type === "status").map((e) => (e.type === "status" ? e.status.personCount : -1));
+      expect(counts).toEqual([null, 3, 3, null]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("MQTT_URL unset -> disconnected, no client, password never logged", () => {
