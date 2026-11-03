@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bell, CircleAlert, Fan, Lightbulb, Power } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, CircleAlert, Cpu, Fan, Hand, Lightbulb, Power, PowerOff } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useRedirectToLogin } from "@/hooks/useRedirectToLogin";
-import type { Command } from "@/lib/control/commands";
+import type { Command, ModeCommand } from "@/lib/control/commands";
+import { isModeCommand } from "@/lib/control/commands";
 import type { GateMode, GateStatus } from "@/lib/telemetry/parseStatus";
-import DeviceSwitch, { type SwitchStatus } from "@/components/DeviceSwitch";
-import StatePill from "@/components/StatePill";
+import DeviceSwitch, { StatusLine, type SwitchStatus } from "@/components/DeviceSwitch";
 import { modeView } from "./modeView";
 
 type Devices = GateStatus["devices"];
 type DeviceKey = keyof Devices;
+type Key = DeviceKey | "mode";
 
 function errorText(res: Response): string {
   if (res.status === 429) return `ส่งคำสั่งบ่อยเกินไป รอ ${res.headers.get("Retry-After") ?? "สักครู่"} วินาที`;
@@ -19,8 +21,9 @@ function errorText(res: Response): string {
   return "ส่งคำสั่งไม่สำเร็จ";
 }
 
-/** The command's first letter identifies the device (P1 → pump … Q1 → relay2). */
-function deviceOf(cmd: Command): DeviceKey {
+/** Which row a command belongs to: the first letter names the device (P1 → pump … Q1 → relay2); a mode word is "mode". */
+function keyOf(cmd: Command): Key {
+  if (isModeCommand(cmd)) return "mode";
   switch (cmd[0]) {
     case "P":
       return "pump";
@@ -39,8 +42,20 @@ function deviceOf(cmd: Command): DeviceKey {
 const CONFIRM_MS = 15_000;
 /** How long the "device confirmed" line stays visible before the row returns to idle. */
 const CONFIRMED_MS = 3_000;
+/** The server allows one command per user per second (controlByUser); stay just over it so quick taps queue instead of failing. */
+const SEND_GAP_MS = 1_100;
+// WHY a named helper: the purity lint cannot tell an event-handler Date.now() from a render-time one.
+const nowMs = () => Date.now();
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-type Note = { key: DeviceKey; target: boolean; cmd: Command; phase: "waiting" | "timeout" | "confirmed" };
+type Note = { cmd: Command; phase: "waiting" | "timeout" | "confirmed"; at: number };
+type Notes = Partial<Record<Key, Note>>;
+
+const MODES: { cmd: ModeCommand; mode: GateMode; label: string; icon: LucideIcon }[] = [
+  { cmd: "AUTO", mode: "AUTO", label: "อัตโนมัติ", icon: Cpu },
+  { cmd: "MANUAL", mode: "MANUAL", label: "ควบคุมเอง", icon: Hand },
+  { cmd: "OFF", mode: "OFF", label: "ปิดระบบ", icon: PowerOff },
+];
 
 type Props = {
   devices: Devices | null;
@@ -50,62 +65,111 @@ type Props = {
   readOnly?: boolean;
 };
 
+/** Does the device report what this note asked for? */
+function reached(note: Note, devices: Devices | null, mode: GateMode | null): boolean {
+  if (isModeCommand(note.cmd)) return mode === note.cmd;
+  const key = keyOf(note.cmd) as DeviceKey;
+  return devices !== null && devices[key] === note.cmd.endsWith("1");
+}
+
 /** Operator/admin sends commands (server enforces it too: POST /api/control requires "operator").
  *  WHY: buttons stay enabled when stale; the server is authoritative and an operator may need to
- *  act during an outage. */
+ *  act during an outage. Each row keeps its OWN note, so a second command never erases the first
+ *  row's confirmation or timeout. */
 export default function ControlPanel({ devices, mode, stale, readOnly = false }: Props) {
-  const [sending, setSending] = useState<Command | null>(null);
+  const [sending, setSending] = useState<Partial<Record<Key, Command>>>({});
+  const [notes, setNotes] = useState<Notes>({});
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<Note | null>(null);
+  const [askOff, setAskOff] = useState(false);
   const redirectToLogin = useRedirectToLogin();
+  // Commands go out one at a time, SEND_GAP_MS apart. WHY: tapping two devices quickly used to fail the
+  // second with "too many commands"; now it waits its turn and its row shows the spinner meanwhile.
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const lastSent = useRef(0);
+
+  const post = (cmd: Command) =>
+    fetch("/api/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: cmd }),
+    });
 
   async function sendCommand(cmd: Command) {
-    if (sending) return;
-    setSending(cmd);
+    const key = keyOf(cmd);
+    if (sending[key]) return;
+    setSending((s) => ({ ...s, [key]: cmd }));
     setError(null);
+    setAskOff(false);
+    const turn = chain.current.then(() => sleep(Math.max(0, lastSent.current + SEND_GAP_MS - nowMs())));
+    chain.current = turn.then(() => {
+      lastSent.current = nowMs();
+    });
     try {
-      const res = await fetch("/api/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: cmd }),
-      });
+      await turn;
+      lastSent.current = nowMs();
+      let res = await post(cmd);
+      if (res.status === 429) {
+        // Another tab or user hit the limit: wait what the server says (capped at 5 s), try once more.
+        await sleep(Math.min(5, Number(res.headers.get("Retry-After")) || 1) * 1000);
+        lastSent.current = nowMs();
+        res = await post(cmd);
+      }
       if (res.status === 401) {
         redirectToLogin();
         return;
       }
       if (!res.ok) setError(errorText(res));
-      else setNote({ key: deviceOf(cmd), target: cmd.endsWith("1"), cmd, phase: "waiting" });
+      else setNotes((n) => ({ ...n, [key]: { cmd, phase: "waiting", at: nowMs() } }));
     } catch {
       setError("ส่งคำสั่งไม่สำเร็จ");
     } finally {
-      setSending(null);
+      setSending((s) => {
+        const rest = { ...s };
+        delete rest[key];
+        return rest;
+      });
     }
   }
 
-  // The device confirmed: it now reports the target state, so say so briefly.
+  // The device confirmed: it now reports the target, so say so briefly.
   // WHY: a stale reading may still hold an old value equal to the target; that is not a confirmation.
-  // WHY: updated during render, not in an effect (React's "adjust state when props change" pattern): the
-  // guard on phase "waiting" makes it run once, and it avoids an extra render with the old phase.
-  if (note && note.phase === "waiting" && !stale && devices && devices[note.key] === note.target) {
-    setNote({ ...note, phase: "confirmed" });
+  // WHY: adjusted during render (React's "adjust state when props change" pattern); the phase guard makes it run once.
+  if (!stale) {
+    let changed = false;
+    const next: Notes = { ...notes };
+    for (const k of Object.keys(next) as Key[]) {
+      const n = next[k];
+      if (n && n.phase === "waiting" && reached(n, devices, mode)) {
+        next[k] = { ...n, phase: "confirmed" };
+        changed = true;
+      }
+    }
+    if (changed) setNotes(next);
   }
 
-  // No confirmation within 15 s: say so and offer a one-tap retry of the same command.
+  // Deadlines are absolute (note.at + window), so re-scheduling after another row changes never extends them.
   useEffect(() => {
-    if (!note || note.phase !== "waiting") return;
-    const id = setTimeout(
-      () => setNote((n) => (n && n.phase === "waiting" ? { ...n, phase: "timeout" } : n)),
-      CONFIRM_MS,
-    );
-    return () => clearTimeout(id);
-  }, [note]);
-
-  // The confirmed line is brief feedback, not a state: clear it after 3 s.
-  useEffect(() => {
-    if (!note || note.phase !== "confirmed") return;
-    const id = setTimeout(() => setNote((n) => (n && n.phase === "confirmed" ? null : n)), CONFIRMED_MS);
-    return () => clearTimeout(id);
-  }, [note]);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (const k of Object.keys(notes) as Key[]) {
+      const n = notes[k];
+      if (!n || n.phase === "timeout") continue;
+      // waiting: absolute deadline from the send time; confirmed: a short display window from now.
+      const wait = n.phase === "waiting" ? Math.max(0, n.at + CONFIRM_MS - Date.now()) : CONFIRMED_MS;
+      timers.push(
+        setTimeout(() => {
+          setNotes((cur) => {
+            const c = cur[k];
+            if (!c || c.at !== n.at) return cur;
+            if (c.phase === "waiting") return { ...cur, [k]: { ...c, phase: "timeout" } };
+            const rest = { ...cur };
+            delete rest[k];
+            return rest;
+          });
+        }, wait),
+      );
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [notes]);
 
   const rows = [
     { key: "pump", name: "ปั๊มหลัก", icon: Fan, onCmd: "P1", offCmd: "P0", state: devices?.pump ?? null, tone: "on" },
@@ -115,41 +179,105 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
     { key: "relay2", name: "ปั๊ม IoT 2", icon: Power, onCmd: "Q1", offCmd: "Q0", state: devices?.relay2 ?? null, tone: "on" },
   ] as const;
 
-  const rowStatus = (key: DeviceKey): SwitchStatus | null => {
-    if (sending && deviceOf(sending) === key) return { phase: "sending", cmd: sending };
-    if (note && note.key === key) return { phase: note.phase, cmd: note.cmd };
-    return null;
+  const statusOf = (key: Key): SwitchStatus | null => {
+    const s = sending[key];
+    if (s) return { phase: "sending", cmd: s };
+    const n = notes[key];
+    return n ? { phase: n.phase, cmd: n.cmd } : null;
   };
 
   const mv = modeView(mode, stale);
+  const modeStatus = readOnly ? null : statusOf("mode");
+  const modeBusy = modeStatus?.phase === "sending";
+  const modeLabel = (cmd: Command) => MODES.find((m) => m.cmd === cmd)?.label ?? cmd;
 
   return (
-    <section aria-labelledby="controls-heading" className="rounded-lg border border-border bg-surface">
-      <header className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
-        <h2 id="controls-heading" className="text-base font-bold text-fg">
-          {readOnly ? "สถานะอุปกรณ์" : "ควบคุมอุปกรณ์"}
+    <section aria-labelledby="controls-heading" className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+      <header className="flex items-baseline justify-between gap-3 bg-brand px-5 py-3.5 text-white">
+        <h2 id="controls-heading" className="text-base font-bold">
+          {readOnly ? "สถานะอุปกรณ์" : "แผงควบคุม"}
         </h2>
-        {/* WHY: the page title row already says the link is down; here one quiet line says what it
-            means for these switches, instead of a second banner. */}
-        {stale && <span className="text-sm text-muted">สถานะอาจไม่ตรงความจริง</span>}
+        {/* WHY: the page header already says the link is down; here one quiet line says what it means for these switches. */}
+        {stale && <span className="text-sm text-white/85">สถานะอาจไม่ตรงความจริง</span>}
       </header>
 
-      <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
-        <span className="text-sm text-muted">โหมด</span>
-        <StatePill tone={mv.tone}>{mv.label}</StatePill>
+      {/* Mode: the controller's own mode. The selected option is what the device reports, not what was last clicked. */}
+      <div className="border-b border-rule px-5 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-bold text-fg">โหมดการทำงาน</h3>
+          <span className="text-sm text-muted">{mv.label}</span>
+        </div>
+
+        {readOnly ? null : (
+          <>
+            <div role="group" aria-label="เลือกโหมดการทำงาน" className="mt-3 grid grid-cols-3 gap-1 rounded-xl bg-surface-2 p-1">
+              {MODES.map((m) => {
+                const pressed = !stale && mode === m.mode;
+                const Icon = m.icon;
+                return (
+                  <button
+                    key={m.cmd}
+                    type="button"
+                    aria-pressed={pressed}
+                    aria-disabled={modeBusy || undefined}
+                    onClick={() => {
+                      if (modeBusy) return;
+                      // WHY: OFF stops automatic control; ask once so a mis-tap cannot do it.
+                      if (m.cmd === "OFF" && !pressed) setAskOff(true);
+                      else void sendCommand(m.cmd);
+                    }}
+                    className={`inline-flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-sm font-bold transition-colors duration-(--dur-base) active:translate-y-px sm:flex-row sm:gap-1.5 ${
+                      modeBusy ? "cursor-progress" : "cursor-pointer"
+                    } ${pressed ? "bg-brand text-white" : "text-fg hover:bg-surface"}`}
+                  >
+                    <Icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                    {m.label}
+                    {pressed && <span className="sr-only">(โหมดปัจจุบัน)</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {askOff && (
+              <div role="alertdialog" aria-labelledby="off-q" className="anim-rise-in mt-3 rounded-xl bg-danger-soft p-3 text-sm">
+                <p id="off-q" className="font-bold text-danger">
+                  ปิดระบบอัตโนมัติ?
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" className="btn-danger min-h-11" onClick={() => void sendCommand("OFF")}>
+                    ยืนยันปิดระบบ
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => setAskOff(false)}>
+                    ยกเลิก
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <p className="mt-2 flex min-h-5 items-center gap-2 text-sm" aria-live="polite">
+              {modeStatus && (
+                <StatusLine
+                  status={modeStatus}
+                  label={`โหมด${modeLabel(modeStatus.cmd)}`}
+                  onRetry={() => void sendCommand(modeStatus.cmd)}
+                />
+              )}
+            </p>
+          </>
+        )}
       </div>
 
       {!readOnly && error && (
         <div
           role="alert"
-          className="anim-rise-in mx-4 mt-3 flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
+          className="anim-rise-in mx-5 mt-3 flex items-center gap-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-medium text-danger"
         >
           <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
           {error}
         </div>
       )}
 
-      <div className="divide-y divide-rule px-4">
+      <div className="divide-y divide-rule px-5">
         {rows.map((row) => (
           <DeviceSwitch
             key={row.key}
@@ -159,8 +287,7 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
             stale={stale}
             onCmd={row.onCmd}
             offCmd={row.offCmd}
-            sending={readOnly ? null : sending}
-            status={readOnly ? null : rowStatus(row.key)}
+            status={readOnly ? null : statusOf(row.key)}
             onSend={sendCommand}
             tone={row.tone}
             readOnly={readOnly}

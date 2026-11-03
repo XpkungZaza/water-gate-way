@@ -15,8 +15,6 @@ export type DeviceSwitchProps = {
   stale: boolean;
   onCmd: Command;
   offCmd: Command;
-  /** Command currently in flight (any row), or null. Locks every button without dimming state. */
-  sending: Command | null;
   /** This row's command status line, or null when idle (the line still reserves its height). */
   status: SwitchStatus | null;
   onSend: (cmd: Command) => void;
@@ -38,18 +36,58 @@ export function commandLabel(cmd: Command): "สั่งเปิด" | "สั
   return cmd.endsWith("1") ? "สั่งเปิด" : "สั่งปิด";
 }
 
+// Solid fill for the segment that matches the reported state; white on each of these is >= 4.5:1.
 const TONE = {
-  on: { soft: "bg-on-soft text-on", dot: "bg-on", icon: "text-on" },
-  warn: { soft: "bg-warn-soft text-warn", dot: "bg-warn", icon: "text-warn" },
-  danger: { soft: "bg-danger-soft text-danger", dot: "bg-danger", icon: "text-danger" },
+  on: { solid: "bg-on text-white", tint: "bg-on-soft text-on", dot: "bg-on" },
+  warn: { solid: "bg-warn text-white", tint: "bg-warn-soft text-warn", dot: "bg-warn" },
+  danger: { solid: "bg-danger text-white", tint: "bg-danger-soft text-danger", dot: "bg-danger" },
 } as const;
 
+/** Status line shared by device rows and the mode selector. */
+export function StatusLine({ status, label, onRetry }: { status: SwitchStatus | null; label: string; onRetry: () => void }) {
+  if (!status) return null;
+  switch (status.phase) {
+    case "sending":
+      return (
+        <span className="inline-flex items-center gap-2 text-muted">
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" strokeWidth={1.75} aria-hidden="true" />
+          กำลังส่ง: {label}…
+        </span>
+      );
+    case "waiting":
+      return <span className="text-fg">ส่งแล้ว: {label} รออุปกรณ์ยืนยัน</span>;
+    case "timeout":
+      return (
+        <span className="inline-flex flex-wrap items-center gap-x-2 text-danger">
+          <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+          อุปกรณ์ยังไม่ยืนยัน {label}
+          <button
+            type="button"
+            aria-label={`ส่ง ${label} อีกครั้ง`}
+            onClick={onRetry}
+            className="cursor-pointer font-bold underline underline-offset-2 hover:no-underline"
+          >
+            ส่งอีกครั้ง
+          </button>
+        </span>
+      );
+    case "confirmed":
+      return (
+        <span className="inline-flex items-center gap-2 text-on">
+          <Check className="size-4" strokeWidth={1.75} aria-hidden="true" />
+          อุปกรณ์ยืนยันแล้ว
+        </span>
+      );
+  }
+}
+
 /**
- * One device row per DESIGN.md: icon + Thai name, a large state readout pill, and a two-segment
- * switch [ สั่งปิด | สั่งเปิด ]. The segment matching the current state is a soft tint with a
- * check and aria-pressed="true" (it is a state, not the action); the other is the outlined
- * command. Unknown: both read as commands. Under it, one fixed-height status line reports the
- * command lifecycle, so nothing on the row ever jumps while a command is in flight.
+ * One device row: icon + Thai name + a state word, and a two-segment control [ ปิด | เปิด ].
+ * The segment that matches the reported state is a solid fill (it IS the state, so it carries
+ * aria-pressed); the other is an outlined command. Unknown state: both look like commands.
+ * A command in flight puts a spinner in the segment that was pressed, so the operator sees what
+ * was sent; only THIS row's buttons wait, the other rows stay usable. One fixed-height status
+ * line under the row reports the lifecycle, so nothing jumps.
  */
 export default function DeviceSwitch({
   name,
@@ -58,134 +96,89 @@ export default function DeviceSwitch({
   stale,
   onCmd,
   offCmd,
-  sending,
   status,
   onSend,
   tone = "on",
   readOnly = false,
 }: DeviceSwitchProps) {
   const view = deviceView(state, stale);
-  // WHY: every switch locks while any command is in flight, but only the commanded row says so.
-  const busy = sending !== null;
+  // WHY: lock only while this row's own command is on the wire; confirmation is tracked by the status line.
+  const inFlight = status?.phase === "sending";
 
   const segment = (which: "off" | "on") => {
-    const label = which === "off" ? "สั่งปิด" : "สั่งเปิด";
+    const label = which === "off" ? "ปิด" : "เปิด";
     const cmd = which === "off" ? offCmd : onCmd;
     const pressed = view === which;
-    const softCls = which === "off" ? "bg-off-soft text-off" : TONE[tone].soft;
+    const sendingThis = inFlight && status.cmd === cmd;
+    const fill = pressed ? (which === "off" ? "bg-off text-white" : TONE[tone].solid) : "bg-surface text-fg hover:bg-surface-2";
     return (
       <button
         type="button"
         aria-pressed={pressed}
-        aria-label={`${label} ${name}`}
-        // WHY: aria-disabled instead of disabled — the row keeps its colours (nothing is dimmed)
-        // and focus is never thrown away; the click handler refuses the command while busy.
-        aria-disabled={busy || undefined}
+        aria-label={`${commandLabel(cmd)} ${name}`}
+        aria-disabled={inFlight || undefined}
         onClick={() => {
-          if (!busy) onSend(cmd);
+          if (!inFlight) onSend(cmd);
         }}
-        className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold transition-colors duration-(--dur-base) ${
-          busy ? "cursor-not-allowed" : "cursor-pointer"
-        } ${
-          pressed
-            ? softCls
-            : "border border-control bg-surface text-fg hover:bg-surface-2 active:translate-y-px"
-        }`}
+        className={`inline-flex min-h-11 w-full min-w-20 items-center justify-center sm:w-auto gap-1.5 px-4 text-sm font-bold transition-colors duration-(--dur-base) active:translate-y-px ${
+          inFlight ? "cursor-progress" : "cursor-pointer"
+        } ${fill}`}
       >
-        {pressed && <Check className="size-4" strokeWidth={1.75} aria-hidden="true" />}
+        {sendingThis ? (
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" strokeWidth={2} aria-hidden="true" />
+        ) : (
+          pressed && <Check className="size-4" strokeWidth={2.25} aria-hidden="true" />
+        )}
         {label}
         {pressed && <span className="sr-only">(สถานะปัจจุบัน)</span>}
       </button>
     );
   };
 
-  const statusLine = () => {
-    if (!status) return null;
-    const label = commandLabel(status.cmd);
-    switch (status.phase) {
-      case "sending":
-        return (
-          <span className="inline-flex items-center gap-2 text-muted">
-            <Loader2 className="size-4 animate-spin" strokeWidth={1.75} aria-hidden="true" />
-            กำลังส่งคำสั่ง: {label}…
-          </span>
-        );
-      case "waiting":
-        return <span className="text-fg">ส่งแล้ว: {label} รออุปกรณ์ยืนยัน</span>;
-      case "timeout":
-        return (
-          <span className="inline-flex items-center gap-2 text-danger">
-            <CircleAlert className="size-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-            อุปกรณ์ยังไม่ยืนยันคำสั่ง {label}
-            <button
-              type="button"
-              aria-label={`ส่ง ${label} อีกครั้ง`}
-              onClick={() => onSend(status.cmd)}
-              className="cursor-pointer font-bold underline underline-offset-2 hover:no-underline"
-            >
-              ส่งอีกครั้ง
-            </button>
-          </span>
-        );
-      case "confirmed":
-        return (
-          <span className="inline-flex items-center gap-2 text-on">
-            <Check className="size-4" strokeWidth={1.75} aria-hidden="true" />
-            อุปกรณ์ยืนยันแล้ว
-          </span>
-        );
-    }
-  };
+  const stateWord = view === "on" ? "ทำงาน" : view === "off" ? "ปิดอยู่" : "ไม่ทราบสถานะ";
 
   return (
-    <div className="py-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Icon
-            className={`size-5 shrink-0 ${view === "on" ? TONE[tone].icon : view === "off" ? "text-off" : "text-muted"}`}
-            strokeWidth={1.75}
-            aria-hidden="true"
-          />
-          <span className="truncate text-base font-bold text-fg">{name}</span>
+    <div className="py-3">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={`grid size-10 shrink-0 place-items-center rounded-xl transition-colors duration-(--dur-base) ${
+              view === "on" ? TONE[tone].tint : view === "off" ? "bg-off-soft text-off" : "bg-surface-2 text-muted"
+            }`}
+          >
+            <Icon className="size-5" strokeWidth={1.75} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-base font-bold text-fg">{name}</p>
+            <p className="flex items-center gap-1.5 text-sm text-muted">
+              <span
+                aria-hidden="true"
+                className={`size-2 shrink-0 rounded-full ${
+                  view === "on" ? TONE[tone].dot : view === "off" ? "bg-off" : "border-[1.5px] border-unknown"
+                }`}
+              />
+              {stateWord}
+            </p>
+          </div>
         </div>
 
-        {/* State readout: word + dot, never colour alone. min-w keeps the three states equal in width. */}
-        <span
-          className={`inline-flex min-w-32 shrink-0 items-center justify-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold transition-colors duration-(--dur-base) ${
-            view === "on"
-              ? TONE[tone].soft
-              : view === "off"
-                ? "bg-off-soft text-off"
-                : "border border-dashed border-unknown text-muted"
-          }`}
-        >
-          <span
-            aria-hidden="true"
-            className={`size-2.5 shrink-0 rounded-full transition-colors duration-(--dur-base) ${
-              view === "on"
-                ? TONE[tone].dot
-                : view === "off"
-                  ? "bg-off"
-                  : "border-[1.5px] border-unknown"
-            }`}
-          />
-          {view === "on" ? "ทำงาน" : view === "off" ? "ปิดอยู่" : "ไม่ทราบสถานะ"}
-        </span>
-      </div>
-
-      {!readOnly && (
-        <>
-          <div role="group" aria-label={`ควบคุม${name}`} className="mt-2.5 grid grid-cols-2 gap-2">
+        {!readOnly && (
+          <div
+            role="group"
+            aria-label={`ควบคุม${name}`}
+            className="grid shrink-0 grid-cols-2 divide-x divide-control overflow-hidden rounded-xl border border-control sm:inline-flex"
+          >
             {segment("off")}
             {segment("on")}
           </div>
+        )}
+      </div>
 
-          {/* Reserved status line: always rendered at one fixed height, empty when idle, so
-              sending/waiting/timeout/confirmed never push the other rows down. */}
-          <p className="mt-1.5 flex min-h-5 items-center gap-2 text-sm" aria-live="polite">
-            {statusLine()}
-          </p>
-        </>
+      {/* Reserved status line: always rendered at one fixed height, empty when idle. */}
+      {!readOnly && (
+        <p className="mt-1.5 flex min-h-5 items-center gap-2 pl-[3.25rem] text-sm" aria-live="polite">
+          {status && <StatusLine status={status} label={commandLabel(status.cmd)} onRetry={() => onSend(status.cmd)} />}
+        </p>
       )}
     </div>
   );

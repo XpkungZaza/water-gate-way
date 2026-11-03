@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
-/* Design tokens from DESIGN.md (light only). Components use the generated classes
+/* Design tokens from DESIGN.md (light only), recoloured to the client's Chiang Mai Maker palette. Components use the generated classes
    (bg-surface, text-muted, border-border, bg-on-soft ...).
    Recharts SVG props cannot read CSS variables, so WaterLevelChart repeats these hex values as constants.
    WHY: chrome is ink only; `accent` (the brand blue) is reserved for water data and the focus ring,
    so the state colours (on / warn / danger) stay the loudest thing on a screen. */
 @theme {
-  --color-bg: #f4f5f2;
+  --color-bg: #f3f6fb;
   --color-surface: #ffffff;
   --color-surface-2: #eceee9;
   /* panel edges ~1.2:1 on white; `control` is one step stronger for inputs and outlined buttons */
@@ -16,7 +16,11 @@
   --color-fg: #142029;
   /* muted is ≥4.5:1 on white (WCAG AA for body text) */
   --color-muted: #55606a;
-  --color-accent: #0a58a3;
+  --color-accent: #3860b0;
+  /* Chiang Mai Maker logo palette: navy for the header and the control panel, sky for water. */
+  --color-brand: #202068;
+  --color-brand-2: #3860b0;
+  --color-sky: #38a8e0;
   /* WHY: #157f3c on on-soft measured 4.4:1; this holds 4.5:1 on on-soft and on white. */
   --color-on: #136b35;
   --color-on-soft: #e3f3e8;
@@ -27,6 +31,11 @@
   --color-danger: #b4231b;
   --color-danger-soft: #fbe7e5;
   --color-unknown: #7b858e;
+  /* soft tiles behind single readings, as in the customer draft */
+  --color-tint-cream: #fff6dd;
+  --color-tint-peach: #fdeee3;
+  --color-tint-blue: #e8f0fb;
+  --color-tint-sky: #e3f4fc;
 
   --font-sans: var(--font-line-seed), system-ui, sans-serif;
 }

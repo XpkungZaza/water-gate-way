@@ -18,7 +18,7 @@ import { LEVEL_DANGER_M, LEVEL_MAX_M, LEVEL_WARN_M } from "./levels";
 
 // WHY: Recharts takes SVG attributes, which cannot read CSS variables; these mirror the @theme tokens in globals.css.
 const CHART = {
-  accent: "#0a58a3",
+  accent: "#3860b0",
   grid: "#eef0ec",
   axis: "#c9cec6",
   tick: "#55606a",
@@ -118,7 +118,7 @@ export default function WaterLevelChart() {
 
       {/* WHY: every state keeps the plot's height, so nothing below jumps when the data lands. */}
       {data.length === 0 ? (
-        <div className="flex h-60 w-full items-center justify-center rounded-md border border-dashed border-border">
+        <div className="flex h-60 lg:h-[24rem] w-full items-center justify-center rounded-md border border-dashed border-border">
           <span className={`text-sm ${error ? "text-danger" : "text-muted"}`}>
             {loading ? "กำลังโหลดข้อมูล…" : (error ?? "ยังไม่มีข้อมูลระดับน้ำที่บันทึกไว้")}
           </span>
@@ -133,7 +133,7 @@ export default function WaterLevelChart() {
           )}
         </div>
       ) : (
-        <div className="h-60 w-full">
+        <div className="h-60 lg:h-[24rem] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke={CHART.grid} />

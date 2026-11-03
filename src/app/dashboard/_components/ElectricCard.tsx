@@ -2,10 +2,10 @@ import type { GateStatus } from "@/lib/telemetry/parseStatus";
 import Reading from "./Reading";
 
 const ROWS = [
-  { key: "voltage", label: "แรงดัน", digits: 1, unit: "V" },
-  { key: "current", label: "กระแส", digits: 2, unit: "A" },
-  { key: "frequency", label: "ความถี่", digits: 2, unit: "Hz" },
-  { key: "power", label: "กำลังไฟ", digits: 1, unit: "W" },
+  { key: "voltage", label: "แรงดัน", digits: 1, unit: "V", tint: "bg-tint-cream" },
+  { key: "current", label: "กระแส", digits: 2, unit: "A", tint: "bg-tint-peach" },
+  { key: "frequency", label: "ความถี่", digits: 2, unit: "Hz", tint: "bg-tint-blue" },
+  { key: "power", label: "กำลังไฟ", digits: 1, unit: "W", tint: "bg-tint-sky" },
 ] as const;
 
 /** Voltage, current, frequency and power from the PZEM meter, as one definition list. */
@@ -17,9 +17,9 @@ export default function ElectricCard({ pzem, live }: { pzem: GateStatus["pzem"] 
       <h3 id="electric-heading" className="text-sm font-bold text-fg">
         ไฟฟ้า (PZEM)
       </h3>
-      <dl className="mt-2">
+      <dl className="mt-3 space-y-2">
         {ROWS.map((r) => (
-          <div key={r.key} className="flex items-baseline justify-between gap-4 py-1.5">
+          <div key={r.key} className={`flex items-baseline justify-between gap-4 rounded-xl px-3 py-2.5 ${r.tint}`}>
             <dt className="text-sm text-muted">{r.label}</dt>
             <dd>
               <Reading value={pzem?.[r.key] ?? null} digits={r.digits} unit={r.unit} color={c} />

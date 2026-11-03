@@ -77,6 +77,13 @@ describe("parseStatus", () => {
     expect(s.radar.liquid).toBe(2.236);
   });
 
+  it("power is the sum of the phases when there is no top-level p; a real 0 W stays 0", () => {
+    expect(parseStatus({ pzem: { phases: [{ p: 100.5 }, { p: 20 }, { p: 0 }] } }, now)!.pzem.power).toBe(120.5);
+    expect(parseStatus(LIVE_B, now)!.pzem.power).toBe(0);
+    expect(parseStatus({ pzem: { p: 340, phases: [{ p: 1 }] } }, now)!.pzem.power).toBe(340);
+    expect(parseStatus({ pzem: { phases: [] } }, now)!.pzem.power).toBeNull();
+  });
+
   it.each([
     ["auto", "AUTO"],
     [" Manual ", "MANUAL"],

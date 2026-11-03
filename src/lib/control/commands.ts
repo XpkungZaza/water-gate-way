@@ -1,7 +1,18 @@
-// WHY: must stay identical to VALID_COMMANDS in ai-receiver/main.py.
-export const COMMANDS = ["P1", "P0", "A1", "A0", "L1", "L0", "M1", "M0", "R1", "R0", "Q1", "Q0"] as const;
+// WHY: the device commands are the same set as VALID_COMMANDS in ai-receiver/main.py.
+export const DEVICE_COMMANDS = ["P1", "P0", "A1", "A0", "L1", "L0", "M1", "M0", "R1", "R0", "Q1", "Q0"] as const;
+
+// WHY: the Pi's cmd_node (shared/protocol.py parse_mode_command) accepts these bare strings on stm32/cmd
+// and sets the controller mode; the status payload reports the mode back as the same word.
+export const MODE_COMMANDS = ["AUTO", "MANUAL", "OFF"] as const;
+
+export const COMMANDS = [...DEVICE_COMMANDS, ...MODE_COMMANDS] as const;
 
 export type Command = (typeof COMMANDS)[number];
+export type ModeCommand = (typeof MODE_COMMANDS)[number];
+
+export function isModeCommand(c: Command): c is ModeCommand {
+  return (MODE_COMMANDS as readonly string[]).includes(c);
+}
 
 const SET: ReadonlySet<string> = new Set(COMMANDS);
 

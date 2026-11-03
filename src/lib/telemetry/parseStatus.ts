@@ -40,6 +40,13 @@ function mode(v: unknown): GateMode | null {
   return m === "AUTO" || m === "MANUAL" || m === "OFF" ? m : null;
 }
 
+/** Sum of the numeric `p` of each phase; null when there is no usable phase (so 0 W stays a real 0). */
+function sumPhases(v: unknown): number | null {
+  if (!Array.isArray(v)) return null;
+  const ps = v.map((ph) => num(obj(ph).p)).filter((x): x is number => x !== null);
+  return ps.length === 0 ? null : ps.reduce((a, b) => a + b, 0);
+}
+
 /** First non-null of the candidates, so a 0 reading wins over a later fallback. */
 function first<T>(...vals: (T | null)[]): T | null {
   for (const v of vals) if (v !== null) return v;
@@ -93,7 +100,8 @@ export function parseStatus(payload: unknown, now: Date): GateStatus | null {
       voltage: first(num(p.v), num(p.voltage)),
       current: first(num(p.i), num(p.current)),
       frequency: first(num(p.freq), num(p.frequency)),
-      power: first(num(p.p), num(p.power)),
+      // WHY: the live payload has no top-level p, only phases[].p; total power is their sum.
+      power: first(num(p.p), num(p.power), sumPhases(p.phases)),
     };
 
     const r = obj(payload.radar);
