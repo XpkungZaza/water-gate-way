@@ -66,8 +66,16 @@ Without the secrets the job logs a notice and skips; it does not fail.
 
 Owner setup (once):
 
-1. Tailscale admin: create an OAuth client with scope `auth_keys` for `tag:cicd`; in the ACL allow
-   `tag:cicd` -> the droplet on port 22 (and define `tag:cicd` in `tagOwners`).
+1. Tailscale admin: tag the machines by role: the droplet `tag:wgw-server`, the Raspberry Pi `tag:wgw-device`; the
+   runner joins as `tag:cicd` (the OAuth client, scope `auth_keys`, tag `tag:cicd`). Declare all three in `tagOwners`
+   and write the ACL **before** tagging a machine (a tagged machine is no longer owned by a user, so user-based
+   rules stop matching it). Least-privilege rules this repo relies on:
+   `tag:cicd -> tag:wgw-server:22` (deploy), `tag:wgw-device -> tag:wgw-server:1883` (Pi publishes to Mosquitto),
+   `tag:wgw-server -> tag:wgw-device:1984` (the app proxies the cameras from go2rtc on the Pi), plus your own
+   user -> both on `:22`. Changing a tagged machine's tags must keep at least one tag, or it needs a re-login.
+   Add Tailscale ACL tests (Access controls -> Tests): `tag:cicd` reaches `tag:wgw-server:22`;
+   `tag:wgw-device` must NOT reach `tag:wgw-server:22` or `tag:cicd` anything else.
+   `DEPLOY_HOST` should be the droplet's tailnet IP, not its MagicDNS name (renaming a machine changes the name).
 2. `ssh-keygen -t ed25519 -f deploy_key -N ''`. On the droplet add to `~cmmc/.ssh/authorized_keys`, on one line:
    `command="/home/cmmc/wgw/deploy/pull-deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA...`
 3. `ssh-keyscan -t ed25519 <droplet tailnet ip>` -> this line is `DEPLOY_KNOWN_HOSTS`.
