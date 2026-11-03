@@ -8,6 +8,15 @@ const ROWS = [
   { key: "power", label: "กำลังไฟ", digits: 1, unit: "W", tint: "bg-tint-sky" },
 ] as const;
 
+const PHASE_NAMES = ["R", "S", "T"] as const;
+const PHASE_ROWS = [
+  { key: "voltage", label: "แรงดัน (V)", digits: 1 },
+  { key: "current", label: "กระแส (A)", digits: 2 },
+  { key: "power", label: "กำลัง (W)", digits: 1 },
+] as const;
+// WHY: a real 0 prints as 0, only a missing value is a dash.
+const fmt = (v: number | null, digits: number) => (v === null ? "—" : v.toFixed(digits));
+
 /** Voltage, current, frequency and power from the PZEM meter, as one definition list. */
 export default function ElectricCard({ pzem, live }: { pzem: GateStatus["pzem"] | null; live: boolean }) {
   // WHY: stale readings stay visible but muted, so an old value is never mistaken for a live one.
@@ -27,6 +36,35 @@ export default function ElectricCard({ pzem, live }: { pzem: GateStatus["pzem"] 
           </div>
         ))}
       </dl>
+      {pzem?.phases && (
+        <table className="mt-3 w-full text-sm tabular-nums">
+          <caption className="sr-only">ไฟฟ้ารายเฟส R S T</caption>
+          <thead>
+            <tr>
+              <td />
+              {pzem.phases.map((_, i) => (
+                <th key={i} scope="col" className="pb-1 text-right font-bold text-fg">
+                  {PHASE_NAMES[i]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PHASE_ROWS.map((r) => (
+              <tr key={r.key}>
+                <th scope="row" className="py-1 pr-2 text-left font-normal text-muted">
+                  {r.label}
+                </th>
+                {pzem.phases!.map((ph, i) => (
+                  <td key={i} className={`py-1 text-right font-bold ${c}`}>
+                    {fmt(ph[r.key], r.digits)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

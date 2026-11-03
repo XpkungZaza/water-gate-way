@@ -6,5 +6,5 @@ export function modeView(mode: GateMode | null, stale: boolean): { tone: PillTon
   if (stale || mode === null) return { tone: "unknown", label: "ไม่ทราบโหมด" };
   if (mode === "AUTO") return { tone: "on", label: "อัตโนมัติ" };
   if (mode === "MANUAL") return { tone: "warn", label: "ควบคุมเอง" };
-  return { tone: "off", label: "ปิดระบบ" };
+  return { tone: "off", label: "OFF" };
 }

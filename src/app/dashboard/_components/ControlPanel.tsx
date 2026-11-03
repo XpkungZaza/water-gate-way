@@ -55,7 +55,7 @@ type Notes = Partial<Record<Key, Note>>;
 const MODES: { cmd: ModeCommand; mode: GateMode; label: string; icon: LucideIcon }[] = [
   { cmd: "AUTO", mode: "AUTO", label: "อัตโนมัติ", icon: Cpu },
   { cmd: "MANUAL", mode: "MANUAL", label: "ควบคุมเอง", icon: Hand },
-  { cmd: "OFF", mode: "OFF", label: "ปิดระบบ", icon: PowerOff },
+  { cmd: "OFF", mode: "OFF", label: "OFF", icon: PowerOff },
 ];
 
 type Props = {
@@ -188,15 +188,16 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
     { key: "relay1", name: "ปั๊ม IoT 1", icon: Power, onCmd: "R1", offCmd: "R0", state: devices?.relay1 ?? null, tone: "on" },
     {
       key: "relay2",
-      // WHY: Q is the controller's master relay M2, not a pump. The Pi traces show M1 and M2 always switch
-      // together and stay on in every mode except OFF, so a Q0 is accepted but never takes effect.
-      name: "รีเลย์หลัก 2",
+      // WHY: the project diagram shows only two pumps, so Q is not a third pump. The Pi traces show M1 and M2
+      // always switch together and stay on in every mode except OFF, so a Q0 (binary or ASCII) never takes effect.
+      // What M1/M2 drive is unconfirmed (master contactor or AI-linked), hence the neutral name.
+      name: "รีเลย์ M2",
       icon: Power,
       onCmd: "Q1",
       offCmd: "Q0",
       state: devices?.relay2 ?? null,
       tone: "on",
-      locked: "ควบคุมโดยระบบ ปิดได้ผ่านโหมดปิดระบบเท่านั้น",
+      locked: "เฟิร์มแวร์ควบคุมเอง สั่งจากเว็บไม่ได้ จะปิดเฉพาะในโหมด OFF",
     },
   ] as const;
 
@@ -310,17 +311,17 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
       <Modal
         open={askOff}
         tone="danger"
-        title="ปิดระบบอัตโนมัติ?"
+        title="สลับเป็นโหมด OFF?"
         onClose={() => setAskOff(false)}
         confirm={{
-          label: "ยืนยันปิดระบบ",
+          label: "ยืนยัน OFF",
           onConfirm: () => {
             setAskOff(false);
             void sendCommand("OFF");
           },
         }}
       >
-        ระบบจะหยุดควบคุมปั๊มตามระดับน้ำจนกว่าจะสลับกลับเป็นอัตโนมัติหรือควบคุมเอง
+        ในโหมด OFF อุปกรณ์รายงานว่าปั๊มและรีเลย์ M1/M2 ปิดทั้งหมด (จากข้อมูลย้อนหลัง) ตรวจสอบหน้างานก่อนยืนยัน
       </Modal>
 
       <Modal open={error !== null} tone="danger" title="ส่งคำสั่งไม่สำเร็จ" onClose={() => setError(null)}>

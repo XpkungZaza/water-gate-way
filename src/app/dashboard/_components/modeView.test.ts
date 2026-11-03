@@ -18,7 +18,7 @@ describe("modeView", () => {
     expect(modeView("MANUAL", false)).toEqual({ tone: "warn", label: "ควบคุมเอง" });
   });
 
-  it('OFF -> off / "ปิดระบบ"', () => {
-    expect(modeView("OFF", false)).toEqual({ tone: "off", label: "ปิดระบบ" });
+  it('OFF -> off / "OFF"', () => {
+    expect(modeView("OFF", false)).toEqual({ tone: "off", label: "OFF" });
   });
 });

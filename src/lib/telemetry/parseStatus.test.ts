@@ -77,6 +77,14 @@ describe("parseStatus", () => {
     expect(s.radar.liquid).toBe(2.236);
   });
 
+  it("keeps the three phases (R, S, T) from the live payload, zeros included", () => {
+    const ph = parseStatus(LIVE_B, now)!.pzem.phases!;
+    expect(ph).toHaveLength(3);
+    expect(ph[0]).toEqual({ voltage: 225.5, current: 0, power: 0, energy: 0 });
+    expect(ph[1].voltage).toBe(0);
+    expect(parseStatus({ pzem: { v: 1 } }, now)!.pzem.phases).toBeUndefined();
+  });
+
   it("power is the sum of the phases when there is no top-level p; a real 0 W stays 0", () => {
     expect(parseStatus({ pzem: { phases: [{ p: 100.5 }, { p: 20 }, { p: 0 }] } }, now)!.pzem.power).toBe(120.5);
     expect(parseStatus(LIVE_B, now)!.pzem.power).toBe(0);

@@ -2,7 +2,14 @@ export type GateMode = "AUTO" | "MANUAL" | "OFF";
 
 export type GateStatus = {
   mode: GateMode | null;
-  pzem: { voltage: number | null; current: number | null; frequency: number | null; power: number | null };
+  pzem: {
+    voltage: number | null;
+    current: number | null;
+    frequency: number | null;
+    power: number | null;
+    /** Per-phase readings (R, S, T) when the payload carries them; absent otherwise. */
+    phases?: { voltage: number | null; current: number | null; power: number | null; energy: number | null }[];
+  };
   radar: { liquid: number | null; airGap: number | null };
   float: Record<string, boolean>;
   wireBreak: { red: boolean | null; blue: boolean | null };
@@ -103,6 +110,12 @@ export function parseStatus(payload: unknown, now: Date): GateStatus | null {
       // WHY: the live payload has no top-level p, only phases[].p; total power is their sum.
       power: first(num(p.p), num(p.power), sumPhases(p.phases)),
     };
+    if (Array.isArray(p.phases) && p.phases.length > 0) {
+      out.pzem.phases = p.phases.slice(0, 3).map((ph) => {
+        const o = obj(ph);
+        return { voltage: num(o.v), current: num(o.i), power: num(o.p), energy: num(o.e) };
+      });
+    }
 
     const r = obj(payload.radar);
     out.radar = { liquid: num(r.liquid), airGap: first(num(r.air), num(r.distance)) };
