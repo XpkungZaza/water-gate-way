@@ -84,6 +84,7 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
   const [askOff, setAskOff] = useState(false);
   // A device command was tapped while the controller is in AUTO: ask before switching to MANUAL.
   const [askManual, setAskManual] = useState(false);
+  const [askAlarm, setAskAlarm] = useState(false);
   const redirectToLogin = useRedirectToLogin();
   // Commands go out one at a time, SEND_GAP_MS apart. WHY: tapping two devices quickly used to fail the
   // second with "too many commands"; now it waits its turn and its row shows the spinner meanwhile.
@@ -178,6 +179,8 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
   // Say so and offer the switch; an unknown mode (stale/missing) is not blocked, the server stays authoritative.
   const guardedSend = (cmd: Command) => {
     if (!isModeCommand(cmd) && !stale && mode === "AUTO") setAskManual(true);
+    // WHY: the siren is the loudest possible failure mode; a mis-tap must not fire it. A0 stays one tap.
+    else if (cmd === "A1") setAskAlarm(true);
     else void sendCommand(cmd);
   };
 
@@ -302,6 +305,22 @@ export default function ControlPanel({ devices, mode, stale, readOnly = false }:
         }}
       >
         ระบบควบคุมอุปกรณ์เองอยู่ จึงสั่งปั๊มหรืออุปกรณ์จากหน้านี้ไม่ได้ สลับเป็นโหมดควบคุมเองหรือไม่? เมื่อสลับแล้วให้กดสั่งอุปกรณ์อีกครั้ง
+      </Modal>
+
+      <Modal
+        open={askAlarm}
+        tone="danger"
+        title="เปิดสัญญาณเตือน?"
+        onClose={() => setAskAlarm(false)}
+        confirm={{
+          label: "เปิดสัญญาณ",
+          onConfirm: () => {
+            setAskAlarm(false);
+            void sendCommand("A1");
+          },
+        }}
+      >
+        ไซเรนจะดังทันทีที่หน้างาน ยืนยันเปิดหรือไม่?
       </Modal>
 
       <Modal
