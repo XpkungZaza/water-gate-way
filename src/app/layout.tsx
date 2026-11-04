@@ -1,21 +1,31 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+// WHY: LINE Seed Sans TH is the one family for the whole UI; 400 covers body copy, 700 headings and values.
+const lineSeed = localFont({
+  src: [
+    { path: "./fonts/LINESeedSansTH_Rg.otf", weight: "400" },
+    { path: "./fonts/LINESeedSansTH_Bd.otf", weight: "700" },
+  ],
+  variable: "--font-line-seed",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Water Gate 1 — Irrigation Department Dashboard",
-  description:
-    "Real-time water management dashboard for monitoring water levels, pump controls, and 3-phase electrical systems.",
+  title: {
+    template: "%s · Water Gate Way",
+    default: "Water Gate Way",
+  },
+  description: "ระบบติดตามระดับน้ำ ควบคุมปั๊ม และกล้อง สำหรับประตูน้ำชลประทาน",
+  robots: { index: false, follow: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#202068",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -24,11 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-    >
-      <body className="min-h-screen bg-white">{children}</body>
+    <html lang="th" className={`${lineSeed.variable} antialiased`}>
+      <body className="min-h-dvh bg-bg font-sans text-fg">{children}</body>
     </html>
   );
 }

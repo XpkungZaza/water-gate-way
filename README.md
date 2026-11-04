@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Water Gate Way
 
-## Getting Started
+Web dashboard for the Water Gate Way system, built with [Next.js](https://nextjs.org). The repo also holds the supporting pieces: an MQTT bridge, Python scripts, an ESP32-S3 HMI firmware project, and config for camera streaming from a Raspberry Pi.
 
-First, run the development server:
+## Repository layout
+
+- `src/`: Next.js app (`app/`, `components/`, `hooks/`, `lib/`)
+- `public/`: static assets
+- `mqtt_bridge.js`: Node.js MQTT bridge (`npm run bridge`)
+- `python_detection_sender.py`, `ai-receiver/`: Python scripts
+- `esp32-s3/`: PlatformIO project for the ESP32-S3 HMI
+- `go2rtc.example.yaml`, `mqtt-bridge.service.example`, `start-pi-webrtc.sh`: video streaming config examples and the Pi startup script
+- `db/migrations/`: SQL schema
+- `scripts/`: admin utilities (`create-user.ts`) and dev tools
+- `tests/`: deployment tests, `deploy/`: deployment helpers, `demo/`: local test fixtures
+- `docs/`: all documentation (see [Documentation](#documentation))
+- `plans/`: improvement plans written by the animation audit
+- `PRODUCT.md`, `DESIGN.md`: product brief and design contract — kept at the root because design tooling reads them from there
+
+## Architecture
+
+The browser talks only to the Next.js server (behind nginx/TLS). Next.js authenticates every request (scrypt passwords, `wg_session` cookie, roles `viewer` < `operator` < `admin`) and is the only component that reaches the backends, all on loopback or the private network:
+
+- Next.js -> PostgreSQL: users, sessions, `control_audit`.
+- Next.js -> Mosquitto (`MQTT_URL`, account `nextjs`): subscribes to the status topics (fanned out to browsers as same-origin SSE at `/api/status/stream`) and publishes operator commands to `stm32/cmd`. Commands from `POST /api/control` go over this connection; the Pi's `cmd_node` executes them. FastAPI/ai-receiver is not in this path.
+- Next.js -> go2rtc (`GO2RTC_URL`, private network): `GET /api/camera/stream` proxies go2rtc's live HTTP video (fragmented MP4). No WebRTC, no ICE.
+
+Content-Security-Policy and the other security headers are set in `next.config.ts`.
+
+## Environment variables
+
+Copy `.env.example` to `.env.local`. Values never go in `NEXT_PUBLIC_*`.
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `PGUSER` `PGHOST` `PGDATABASE` `PGPASSWORD` `PGPORT` | Next.js, `mqtt_bridge.js` | PostgreSQL connection (app user, least privilege) |
+| `MQTT_URL` `MQTT_USERNAME` `MQTT_PASSWORD` | Next.js | Broker account `nextjs`: reads the status topics, writes only `stm32/cmd` |
+| `MQTT_TOPIC_STATUS` | Next.js, ai-receiver | Extra status topic to subscribe to |
+
+| `CONTROL_SHARED_SECRET` | ai-receiver (FastAPI) | `X-Control-Token` on its HTTP endpoints; at least 32 chars; it refuses to start without it. The Next.js app no longer uses it |
+| `GO2RTC_URL` | Next.js | go2rtc API, must be reachable from the app server |
+| `API_HOST` | FastAPI | Bind address, default `127.0.0.1` |
+| `MQTT_BROKER` `MQTT_TOPIC` `MQTT_QOS` | `mqtt_bridge.js` | Bridge broker, topic, QoS |
+| `MQTT_HOST` `MQTT_PORT` `MQTT_TOPIC_CONTROL` `WGW_SERIAL_PORT` | ai-receiver | Broker, control topic, serial port |
+
+## First-time setup
+
+1. Apply `db/migrations/001_auth.sql` as a DB role with CREATE privilege (it needs the `citext` and `pgcrypto` extensions).
+2. Create the app DB user and grant only: `SELECT, INSERT, UPDATE, DELETE` on `users`, `sessions`, `control_audit`, plus `USAGE` on `control_audit_id_seq`.
+3. Only if you run ai-receiver: generate its secret with `openssl rand -hex 32` and set `CONTROL_SHARED_SECRET` for it. Give the broker account `nextjs` write access to `stm32/cmd`, or operator commands fail with `device_unavailable`.
+4. Create the first admin: `node scripts/create-user.ts <email> <role>` (roles: `viewer`, `operator`, `admin`; Node >= 22.6). There is no public sign-up.
+5. `npm install && npm run build && npm run start`.
+
+## Deploy checklist
+
+Containment (do first):
+
+- [ ] **Mosquitto:** do not just bind it to loopback: the Pi's services connect over the network. Follow `docs/superpowers/plans/2026-10-30-broker-lockdown.md` (users, ACL, move the Pi to the Tailscale IP first). ACL for `nextjs`: `read stm32/status/all`, `read water/gate/status`, `write stm32/cmd`. Nobody except `nextjs` and the Pi may publish `stm32/cmd`. Remove the websocket listener.
+- [ ] **nginx:** delete the `location /mqtt` and any `location /api/control` or `/ws/` block that proxies to Mosquitto or FastAPI directly. Only `proxy_pass` to Next.js remains.
+- [ ] **FastAPI:** run with `host=127.0.0.1` (default via `API_HOST`).
+- [ ] **TLS:** `certbot --nginx -d map.hyxc.io` (or a `*.hyxc.io` DNS-01 cert); confirm `systemctl list-timers | grep certbot`.
+- [ ] **Verify:** from outside, the WebSocket handshake to `https://map.hyxc.io/mqtt` no longer returns `101`, and `nc -vz map.hyxc.io 1883` and `:8000` fail.
+- [ ] **Rotate** the admin password that was pasted into chat on 2026-10-30.
+
+Rebuild-specific:
+
+- [ ] Before sending a real command, confirm the `nextjs` broker account can write `stm32/cmd` and that the Pi's `cmd_node` is running. The app reports `sent` once the broker connection takes the message; delivery is visible in the status stream.
+- [ ] nginx must overwrite forwarding headers, not append: `proxy_set_header X-Forwarded-For $remote_addr;`, `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-Host $host;` (rate limiting and the Origin check rely on them).
+- [ ] nginx: `location ~ ^/api/(status|camera)/stream$` needs `proxy_buffering off;` and a long `proxy_read_timeout` (SSE and live video).
+- [ ] go2rtc: the app server must reach its API (tailnet ACL plus `tailscale serve` on the Pi, never Funnel). Video goes over HTTP through the app, so no TURN server or public WebRTC port is needed.
+- [ ] Confirm the response headers from `curl -sI https://map.hyxc.io/login` (HSTS, nosniff, X-Frame-Options, Referrer-Policy, CSP).
+
+## Testing
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm test
+npm run typecheck
+npm run lint
+ai-receiver/.venv/bin/python -m pytest ai-receiver/test_auth.py
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Documentation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+All documentation lives in `docs/`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Setup and integration guides in [`docs/setup/`](docs/setup):
+  - [PI_WEBRTC_RTSP_SETUP_GUIDE.md](docs/setup/PI_WEBRTC_RTSP_SETUP_GUIDE.md): Raspberry Pi 4 pulls the Tapo C310 RTSP stream and serves it over WebRTC using pi-webrtc.
+  - [RASPBERRYPI_SETUP_GUIDE.md](docs/setup/RASPBERRYPI_SETUP_GUIDE.md): Raspberry Pi 4 setup with TzuHuanTai/RaspberryPi-WebRTC for low-latency video from a CSI or USB camera.
+  - [MQTT_BRIDGE_SETUP_GUIDE.md](docs/setup/MQTT_BRIDGE_SETUP_GUIDE.md): Video from the Pi reaches the dashboard as Base64 JPEG frames over MQTT.
+  - [WEBRTC_INTEGRATION_GUIDE.md](docs/setup/WEBRTC_INTEGRATION_GUIDE.md): `<WebRTCPlayer />` component props, usage, and the signaling backend it requires.
+  - [TAPO_C310_SETUP_GUIDE.md](docs/setup/TAPO_C310_SETUP_GUIDE.md): Tapo C310 RTSP to WebRTC using an FFmpeg transcoder.
+- [docs/IDEA.md](docs/IDEA.md): the original product idea and constraints.
+- [docs/diagram/](docs/diagram): system flow diagrams (draw.io sources + PDF).
+- `docs/agent-log/`, `docs/audits/`, `docs/superpowers/plans/`: dated working logs, audits, and operational plans (the broker lockdown referenced in the deploy checklist lives there).
+- [AGENTS.md](AGENTS.md): Instructions for AI coding agents. This Next.js version has breaking changes, so read the bundled docs in `node_modules/next/dist/docs/` first.
+- [CLAUDE.md](CLAUDE.md): Claude Code entry point that imports `AGENTS.md`.
+- [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) at the repo root: the product brief and the design contract (light-only instrument-panel world, tokens, motion rules). They stay at the root because design tooling reads them from there.

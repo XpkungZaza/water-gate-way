@@ -1,0 +1,367 @@
+# UI redesign: achromatic ledger + staff gauge (2026-11-02)
+
+Visual and markup only. No server actions, API routes, `src/lib`, hooks or form field names change.
+Review before this (critique, inspector numbers) is in the session; screenshots in `.taste-skill/before/`.
+
+## [--:--] Review and local test rig
+- **Action:** read every page/component; ran tasteskill lint + inspect (`--app`) on 7 screens at 1440/768/390.
+  Local Postgres in Docker (`wgw-design-pg`, port 55432) seeded from `db/migrations/*.sql` plus 4 sample gates,
+  24 sample water levels and 3 test users with sessions; a scratchpad proxy adds the session cookie per role.
+- **Why:** pages are behind auth and the dev DB was not running; the inspector cannot send cookies.
+- **Result:** 0 source FAIL; inspector FAIL on the `hatch` gradient; WARN many-h1 (admin), contrast 4.4:1 on
+  green pills, heavy borders 1.45:1, tiny text >50%, voids on admin overview, gates page 2.4 screens.
+  Found: `StatusStrip` labels the wall clock as "อัปเดตล่าสุด" instead of `status.receivedAt`.
+- **Lesson:** a freshness stamp must come from the data, not the clock; a ticking clock reads as live even when the feed is dead.
+- **Dead end:** inspector timed out ("Chrome did not start within 20s"): only Chrome Dev is installed; `CHROME_PATH` fixed it.
+
+## [--:--] Style decision (mini-ADR)
+- **Chosen:** `achromatic-ledger` (seed 1020810353), brand palette and LINE Seed kept. Chrome in ink, near-black primary,
+  brand blue only on water data (gauge fill, chart line). Shell redrawn from "open plane sidebar" to a 48px top bar:
+  the product has two destinations and the map needs the width.
+- **Rejected:** `framed-sheet` (adds a tinted frame for a 2-link nav), `accent-ladder` (puts brand tints on chrome,
+  which competes with the on/warn/danger state colours that must stay the loudest thing).
+- **Signature element:** a vertical staff gauge (ไม้วัดระดับน้ำ) with the warning 3 m / danger 5 m marks, the largest figure on the dashboard.
+
+## [--:--] Tokens, shell, dashboard
+- **Action:** globals.css (ink primary, lighter border + `rule` + `control` tokens, `on` darkened for 4.5:1, `hatch`
+  replaced by `pill-unknown`); AppHeader.tsx rewritten (BrandMark staff-gauge SVG, grey-pill nav, no h1, usable from
+  the client dashboard); DashboardClient.tsx rewritten (title row with receivedAt, one grid, 384px control rail);
+  new LevelGauge.tsx, levels.ts (+ levels.test.ts), components/StatePill.tsx; readings cards, WaterLevelChart,
+  CameraGrid, ControlPanel, DeviceSwitch, Go2RTCPlayer (spinner/dot classes only) restyled.
+  Deleted DashboardHeaderClient.tsx (merged into AppHeader) and RadarCard.tsx (the gauge shows liquid + air gap).
+- **Why:** the screen's question is "how high is the water, is it safe": the biggest figure must answer it.
+  Thresholds moved to one module so the gauge and chart cannot disagree. CSV link moved next to the chart it exports.
+- **Result:** tsc clean. Inspector: 0 FAIL (was 1). Readings at 4 columns broke Thai labels mid-word → 2 columns.
+- **Lesson:** a sibling column of fixed width (the 384px rail) shrinks the main column more than the viewport suggests;
+  size inner grids to the column, not to the window.
+- **Test rig:** local mosquitto container (`wgw-design-mqtt`, 51883) publishing a Format B sample every 3 s.
+
+## [--:--] Map, admin, login
+- **Action:** page.tsx (map list with h1 + counts, 360px list, StatePill); admin/_components/AdminShell.tsx (new,
+  one header/tabs/h1 frame), AdminNav (ink underline), admin/page.tsx (role and gate counts from a count-only query),
+  users/page.tsx (table without header band, reset password folded into `<details>`, disable as a red text action),
+  gates/page.tsx (one row per gate, edit form opens in place, create form below), login/page.tsx (mark + name).
+- **Why:** admin overview was two links on an empty page; gates was 2.4 screens of open forms for 4 gates.
+- **Result:** form field names and server actions unchanged; vitest 303/303; tsc clean; eslint clean.
+- **Lesson:** `<details>/<summary>` gives a keyboard-accessible disclosure with zero JS, which suits server components.
+
+## [--:--] Verification
+- **Action:** `next build` + `next start` behind the cookie proxy; inspector `--app` on 8 screens; Browser pane look.
+- **Result:** build OK. Inspector: 1 FAIL left on map = Leaflet/OSM attribution 5px from the edge (third-party credit,
+  kept). WARN kept: hero-void on admin overview / no-device / login (short screens), ragged-row on the dashboard
+  (sticky rail vs main column), no-poster on camera clips.
+- **Dead end:** dev server behind the proxy never hydrated (Next 16 blocks cross-origin dev resources; HMR socket
+  refused), so client data never loaded in screenshots. Production build behind the same proxy works.
+- **Dead end:** threshold labels at insideTopRight sat on the line; moved to insideTopLeft (still data-dependent).
+
+## Summary
+- Changed: globals.css, layout unchanged; AppHeader, StatePill (new), DeviceSwitch, Go2RTCPlayer (classes), WaterGateMapLoader;
+  dashboard DashboardClient + _components (LevelGauge, levels(.test), readings, chart, cameras, controls); map page;
+  admin pages + AdminShell (new) + AdminNav; login page; DESIGN.md; .gitignore (/.taste-skill/).
+- Deleted: src/components/DashboardHeaderClient.tsx, src/app/dashboard/_components/RadarCard.tsx.
+- Unchanged: src/lib, src/hooks, src/app/api, server actions, form field names, proxy.ts.
+- Remaining: confirm radar `liquid` and DB `water_height` share one datum (gauge vs chart); real-device look on site.
+- Top 3 lessons:
+  1. 📌 GENERAL: a "last updated" label must come from the data's timestamp, never the wall clock.
+  2. 📌 GENERAL: put a threshold in one module when two views draw it; drift between them is a silent safety bug.
+  3. 📌 GENERAL: Next dev behind a proxy on another origin will not hydrate; test client UI on `next start`.
+- Mistakes & dead ends: inspector Chrome path; dev-mode hydration behind proxy; 4-column readings broke Thai labels.
+
+## [--:--] Self sign-up (/register) — new task, same session
+- **Decision (Leo):** sign-up gives instant `viewer` access, no admin approval; no migration.
+- **Threat model (fast):** who: anyone on the internet. Worst: role escalation via a crafted field; email
+  enumeration; scrypt (128 MiB/hash) memory DoS by sign-up spam; users-table flooding; strangers seeing cameras
+  (accepted by Leo). Controls: role hard-coded server-side; same redirect + same scrypt work for new and existing
+  emails (`on conflict do nothing`); per-IP 5/h + global 50/h limit before scrypt; parameterised SQL; audit row
+  `user.register` with id + ip only.
+- **Action:** src/app/register/{page,RegisterForm,actions,actions.test}.tsx/ts (new), rateLimit.ts (2 limiters),
+  proxy.ts (/register public), login/page.tsx (link + "registered" notice).
+- **Result:** vitest 314/314 (11 new), tsc + eslint clean.
+- **Dead end:** first SQLi test used an email with spaces; the shape check rejected it before the DB, so the test
+  asserted on a query that never ran. Rewrote it with a space-free payload that reaches the insert.
+- **Lesson:** a validation test must prove the input reached the layer it claims to test.
+- **Rejected:** auto sign-in after sign-up (would reveal which emails already exist: those cannot sign in).
+
+## [--:--] QA, Haiku security tests, scrutinize
+- **QA (browser, prod build):** mismatch error shown; bug found: React 19 reset the whole form after the action,
+  so the email had to be retyped → email input made controlled. Sign-up → `/login?registered=1` → sign-in →
+  viewer dashboard (read-only panel, no admin link). DB row role=viewer, audit `user.register` with id + ip.
+- **Haiku agents (2, local rig only):** no SQLi/XSS/CRLF/open-redirect/mass-assignment/enumeration on /register;
+  role field ignored; viewer gets 404 on /admin and 403 on /api/control; CSRF origin check holds.
+- **Bug in this change (fixed):** limiter array evaluated both `hit()` before checking, so a client already refused
+  per IP still spent the global quota. Now sequential; regression test fails on the old code, passes on the fix.
+- **Pre-existing, not fixed (reported):** `clientIp` trusts the first X-Forwarded-For → per-IP limits (login and
+  sign-up) bypassable unless `CLIENT_IP_HEADER=cf-connecting-ip` and the port is localhost-only; login timing
+  differs for legacy bcrypt / malformed hashes vs unknown email (dummy scrypt); camera route caps 6 streams per
+  user but has no global cap, which self sign-up makes reachable by anyone.
+- **Wording:** the post-sign-up notice now holds for both new and existing emails.
+- **Lesson:** 📌 GENERAL: `[a(), b()]` evaluates both calls before any check; rate limiters must short-circuit.
+- **Lesson:** a test only proves a fix when it fails on the unfixed code; run it red first.
+
+## [--:--] Fix the 3 remaining risks (TDD: each test red first)
+- **Camera (route.ts):** global cap 12 streams + a 6-stream pool for viewers, both `429 camera_busy`; slots
+  released on every exit path. Why: sign-up lets anyone open streams; operators must never be starved.
+- **clientIp.ts:** default mode now takes the LAST X-Forwarded-For entry (the hop the proxy appended), not the
+  first (client-chosen). `cf-connecting-ip` mode unchanged. Control route fixture reordered to the new contract.
+  Next only fills XFF when absent (`base-server.js` `??=`), so direct access is still spoofable: the app must
+  listen on loopback (`next start -H 127.0.0.1`), which the 2026-10-31 cutover log says the droplet does.
+- **password.ts:** every rejection path runs one scrypt (malformed rows, foreign params, bad bcrypt cost,
+  >72-byte bcrypt input); bcrypt rows run bcrypt + one scrypt. Tested by counting scrypt calls, not timing.
+- **Result:** vitest 324/324, tsc + eslint clean, build OK. Rig re-test: timing 0.21–0.28 s both sides (was
+  0.005 vs 0.200); spoofed first XFF entry no longer resets the bucket (6th sign-up limited).
+- **Residual:** legacy bcrypt rows are ~bcrypt-cost slower than unknown emails until rehashed on next login.
+  Rig server now bound to 127.0.0.1 (the agent saw it reachable on the LAN).
+- **Lesson:** 📌 GENERAL: test timing defences by counting the expensive call, not by measuring wall time.
+- **Lesson:** 📌 GENERAL: in X-Forwarded-For only the rightmost hop your own proxy appended is trustworthy.
+
+## [--:--] Deploy 529424f to the droplet (asked by Leo)
+- **Checks (read-only):** current = 20261101-24d37ca; `CLIENT_IP_HEADER=cf-connecting-ip` and `PGOPTIONS` in
+  app.env; unit runs `next start -H 127.0.0.1 -p 3000`; wgw.users/admin_audit/gates/sessions exist (no migration);
+  package.json/lock unchanged since 24d37ca; 453 MB available, no swap.
+- **Action:** clean worktree at 529424f (324 tests, tsc, eslint, build); rsync `.next` (no dev/cache), public,
+  next.config.ts, package*.json to releases/20261102-529424f; `cp -al` node_modules from 24d37ca (no `npm ci`:
+  it was OOM-killed last time); smoke on 127.0.0.1:3100; then atomic switch (`ln -sfn current.new && mv -T`).
+- **Smoke:** /login 200, /register 200, /, /dashboard, /admin 307 to login; /api/control, camera, status 401;
+  HSTS, nosniff, DENY, Referrer-Policy, CSP present; RSS 121 MB; 0 errors in log. No sign-up was submitted on prod.
+- **Dead end:** `pkill -f "next start … 3100"` matched the ssh shell's own command line and killed it (exit 255);
+  the smoke server was already stopped by `kill $PID`. Lesson: 📌 GENERAL: `pkill -f` matches its own invoking
+  shell when the pattern appears in that shell's command; kill by PID instead.
+- **Rollback:** `ln -sfn /home/cmmc/wgw/releases/20261101-24d37ca current.new && mv -T current.new current`, then restart.
+- **Waiting:** Leo's `sudo systemctl restart water-gate` (cmmc has no passwordless sudo).
+- **First restart (09:08 UTC) ran the OLD release:** `current` had been pointed back to 20261101-24d37ca at
+  09:07:45, 20 s before the restart, most likely because both command blocks in my message (deploy restart and the
+  rollback line) were run. Re-switched to 20261102-529424f on Leo's word; Leo restarted again at 09:09:36.
+- **Verified live:** process cwd = releases/20261102-529424f; www.hyxc.io /login 200, /register 200 with the
+  form, login page links to /register, /dashboard 307 to login, /api/control and camera 401; 0 error lines.
+- **Lesson:** 📌 GENERAL: never put a rollback command next to the deploy command in the same message; give it
+  only when asked, or label it so it cannot be run by accident. And check what the process actually runs
+  (`readlink /proc/<pid>/cwd`), not what the symlink says.
+
+## [--:--] 🔴 Next.js 16.2.2 → 16.4.3 (found while preparing CI)
+- **Finding:** `npm audit --omit=dev` on the deployed lock: 1 critical, 6 high. Next 16.2.2 is in range of
+  unauthenticated RCE in the Image Optimization API (SVG `<=16.4.0`, AVIF `<16.3.3`), several Middleware/Proxy
+  bypasses, Server Action DoS, SSRF. Prod `https://www.hyxc.io/_next/image?url=/favicon.ico&w=64` answered 200
+  without a session (the proxy matcher skips `_next/image`); `public/` held 5 unused template SVGs.
+  Exploitability not proven (no exploit run); treated as P0 because the host controls pumps.
+- **Action (approved by Leo):** `npm install --save-exact next@16.4.3 eslint-config-next@16.4.3`, `npm audit fix`
+  (prod deps: 0 vulnerabilities); `images: { unoptimized: true }` in next.config.ts (traced: next-server.js
+  renders 404 for /_next/image when set); removed public/*.svg (unused anywhere).
+- **New lint errors (react-hooks/set-state-in-effect):** ControlPanel's confirm step moved from an effect to a
+  guarded render-phase update (React's "adjust state when props change" pattern); the chart's first load wrapped
+  in an async IIFE (fetchWaterLevels awaits fetch before any setState). 3 warnings about
+  `window.location.assign("/login…")` kept on purpose (full reload on session expiry).
+- **Result:** 324/324, tsc clean, eslint 0 errors, build OK. Rig: /_next/image 404; command flow traced with a
+  MutationObserver: P1 sending → confirmed at 52 ms → cleared at 3055 ms; P0 against a device that stays on:
+  waiting → "ยังไม่ยืนยัน" at 15058 ms.
+- **Dev-only audit left:** vitest chain (tinypool critical, @vitest/mocker, minimatch) runs only in dev/CI;
+  handle with the CI work (vitest major upgrade).
+- **Lesson:** 📌 GENERAL: run `npm audit --omit=dev` before every deploy, not only in CI; a framework CVE can land
+  between two deploys of unchanged app code.
+- **Deploy 5b25df1:** deps changed, so node_modules could not be hard-linked; built a linux/amd64 production
+  node_modules in Docker on the Mac (`node:20.20.2-bookworm-slim`, `npm ci --omit=dev --ignore-scripts`; droplet
+  glibc 2.39 ≥ image 2.36) and rsynced it (446 MB). Smoke on :3100 passed (/_next/image 404), switched `current`,
+  Leo restarted at 09:25:48 UTC. Verified: process cwd releases/20261102-5b25df1; www.hyxc.io /login 200,
+  /register 200, /_next/image 404, /api/control 401; no error from the new process (one go2rtc AbortError at
+  09:22:12 came from the old process).
+- **Lesson:** 📌 GENERAL: when the server is too small to `npm ci`, install production deps for the target
+  platform in a matching container (`--platform linux/amd64`, same Node, glibc ≤ target) and ship them.
+
+## [--:--] CI (GitHub Actions)
+- **Action:** `.github/workflows/ci.yml`: on push and pull_request; `permissions: contents: read`; actions pinned
+  by commit SHA (checkout v7.0.1 `3d3c42e…`, setup-node v7.1.0 `949feb2…`); Node 20.20.2 (what the droplet runs).
+  Job `verify`: `npm ci --ignore-scripts`, vitest, `tsc --noEmit`, `npm run lint`, `npm run build`.
+  Job `audit`: `npm audit --audit-level=high` (prod and dev, blocking).
+- **Dev audit fix:** vitest 3.2.7 → 4.1.12 (exact). 4.x drops tinypool (critical prototype-pollution RCE) and
+  ships the fixed @vitest/mocker; vitest 5 was rejected because it needs Node ≥22 and CI must run prod's Node 20.
+  324/324 unchanged. Left: minimatch (moderate) via the eslint chain, no non-breaking fix; below the gate.
+- **Verified:** the exact steps in a fresh worktree on the Mac and in `node:20.20.2-bookworm-slim` (linux/amd64):
+  324 tests, tsc, lint 0 errors (3 known warnings), build, audit exit 0. YAML parses; actionlint not installed.
+- **Not verified:** a real GitHub run (needs the push).
+- **Lesson:** 📌 GENERAL: pin third-party actions to a commit SHA, not a tag; and test the CI steps in a container
+  with the runner's OS and Node before the first push.
+
+## [--:--] Debug: control rate limit (Haiku) + camera real-time (Pi online)
+- **Rate limit (Haiku, reviewed):** repro test showed 10 presses then a 429 with Retry-After 50 s. Root cause
+  `rateLimit.ts` `controlByUser {limit: 10, windowMs: 60_000}`, a fixed window (lockout up to 60 s). Changed to
+  `{limit: 1, windowMs: 1_000}`; tests red then green (route.test.ts, guards.test.ts); 325/325, tsc, lint OK.
+  Safety: 1/s lets a pump relay be toggled every second (short-cycling); a per-device minimum interval was
+  proposed, not built (N is a hardware decision). Note: the "x-real-ip fallback" test now sends a second POST that
+  is 429; it still passes because it only checks audit IPs. Not committed.
+- **Camera numbers (Pi go2rtc over tailnet, office1..3 = Tapo stream2, H.264 640x360, ~15 fps, keyframe every 2 s):**
+  frame.jpeg 0.9–1.9 s behind the OSD clock (1.3–3.9 s to answer, waits for a keyframe); raw stream.mp4 read by
+  ffmpeg ~1 s behind.
+- **Bug found (reliable repro, Chrome Dev headless and the app pane):** the dashboard players never start.
+  `<video autoPlay src=stream.mp4>` buffers ~3.2 s, stays `readyState 3`, `paused`, and the player reconnects every
+  ~15 s (CONNECT_TIMEOUT_MS, `playing` never fires). Root cause: autoplay waits for HAVE_ENOUGH_DATA, which a live
+  progressive MP4 (duration = buffered end) never reaches, and Chrome stops downloading a paused element at ~3 s.
+  Disproof run: a manual `play()` starts all three at once. A forced live-edge start then hits `ended` (duration =
+  buffer end) and the player's onEnded reconnects. Camera-MSE log of 2026-10-30 said "Not verified: playback in a
+  browser".
+- **Prototype (in the measuring browser only, app unchanged):** MSE fed by `fetch()` of the same
+  `/api/camera/stream` route, `duration = Infinity`, keep the playhead ~0.3 s from the buffer end: plays
+  continuously, ~0.8 s buffered, OSD 1.4–2.4 s behind wall clock (Mac → tailnet → Pi). Prod adds the droplet hop
+  and Cloudflare.
+- **Dead end (mine):** my rig cookie proxy did not close the upstream request when the client left
+  (`r.pipe(res)` without `res.on("close")`), so the app kept stream slots and answered 429 `too_many_streams` /
+  `camera_busy` with no viewer connected. Fixed in the proxy; the app itself frees slots on disconnect (8/8
+  open-and-drop runs, direct and via proxy, all 200, 0 upstream connections left).
+- **Lessons:** 📌 GENERAL: `autoplay` on a live progressive stream may never fire; start playback yourself on
+  `loadeddata`, or use MSE with an infinite duration. 📌 GENERAL: a test proxy must forward client disconnects, or
+  it manufactures resource leaks that look like app bugs. 📌 GENERAL: a ±1 s OSD clock in frame is a cheap
+  glass-to-glass meter.
+
+## [--:--] Camera player rewritten on MSE (approved by Leo)
+- **Action:** `src/components/Go2RTCPlayer.tsx` FULL REWRITE: `fetch()` of the same `/api/camera/stream` route →
+  MediaSource (ManagedMediaSource on iOS Safari 17.1+), `sb.mode = "segments"`, `duration = Infinity`, playhead
+  kept near the live edge, old media trimmed; progressive fallback starts playback explicitly on `loadeddata`.
+  New pure `src/components/liveEdge.ts` (+7 tests, red first): seek to end−0.3 s when outside the buffer or more than
+  1.5 s behind; trim to the last 10 s once the buffer exceeds 12 s. Removed `liveLag.ts` (+13 tests): its
+  wall-clock lag model only existed for the progressive pipe. Retries now never stop: backoff 2→30 s, "ออฟไลน์"
+  after 3 failures with a retry-now button; the connect timeout also covers background retries.
+- **Measured (headless Chrome Dev, rig → tailnet → Pi):** all three tiles "สด" for 30 s, ~0.5 s buffered,
+  OSD 0.6–1.9 s behind wall clock (raw stream floor ~1 s). Network drop (proxy `kill -9` for 5 s): tiles go to
+  "กำลังเชื่อมต่อ" within 1 s and are live again 2 s after the path returns. No upstream connection left after
+  the browser closes.
+- **Breadcrumb not explained:** with the server process killed (SIGTERM, then SIGKILL) playback in the earlier
+  runs continued without a gap; the process topology of `next start` behind my proxy was not resolved. Recorded,
+  not used as evidence; the proxy-drop test was used instead because its outcome is unambiguous.
+- **Gate:** vitest 319/319, tsc, eslint 0 errors (a 4th `location.assign` warning, the same 401 → login pattern),
+  build OK. Not verified: Safari / iOS (ManagedMediaSource path), prod path through droplet + Cloudflare.
+- **Lesson:** 📌 GENERAL: a monitoring view must retry forever with backoff; "give up after N" turns a 5-second
+  outage into a dead screen until a human clicks.
+- **Deploy 73cbd6c (rate limit 1/s + MSE player):** prod dependency set identical to 5b25df1 (156 packages, same
+  hash), so node_modules hard-linked from 20261102-5b25df1. Clean build (319 tests, tsc, lint 0 errors, audit 0
+  high). Smoke on :3100 passed; MSE code present in the client bundle; droplet → go2rtc frame 200. Leo restarted
+  at 10:56:31 UTC; process cwd releases/20261102-73cbd6c; www.hyxc.io routes as expected; 0 error lines.
+  Not verified: live playback on prod with a real session (needs Leo's account), Safari/iOS.
+
+## [--:--] Chart does not show, "auto" state, new icons (Leo; work given to opencode)
+- **Chart root cause (evidence, read-only on prod):** `public.water_levels` has **0 rows**. The app's own query
+  (`select ... from water_levels order by measured_at desc limit 24`, run with `search_path=wgw,public`) resolves to
+  `public.water_levels`, has the right columns and returns 0 rows without error, so the dashboard shows its empty
+  state ("ยังไม่มีข้อมูลระดับน้ำที่บันทึกไว้") instead of a line. Nothing writes the table: the only writer is
+  `mqtt_bridge.js`, which is not in the release directory, no bridge unit exists on the droplet (only
+  `mosquitto` and `water-gate`), and the Pi runs its own stm32 nodes (serial_bridge, status_node, dashboard_rx/tx,
+  cmd_node, trace_node), none of which touch Postgres. Live payload has `radar.liquid` (2.236 m), so the bridge
+  would insert once the Pi's `stm32/status/all` reaches it (throttle 60 s).
+- **Fix chosen (no new code): deploy the existing bridge** as a systemd unit next to `water-gate`.
+  Rejected: inserting from the Next.js server (its broker connection starts lazily on the first SSE client or command,
+  so nothing would be recorded while nobody has the dashboard open; fixing that needs `instrumentation.ts`).
+  Needs Leo: sudo (unit) and the broker login for the bridge (a credential file, a Hard Stop, not created by me).
+- **"Auto" state (live, from the Pi trace log):** the system is in **MANUAL** now (`stm32/status/all` `"mode":"MANUAL"`,
+  `tank/mode "MANUAL"`). The Pi has AUTO(0)/MANUAL(1)/OFF(2). The web has no auto button and `parseStatus` ignores
+  `mode`. The web's M1/M0 are not a mode switch on the new Pi pipeline: `protocol.py` maps M→master 1 (m1),
+  Q→master 2, P→pump 1, R→pump 2.
+- **Second bug found while comparing the live payload with the parser:** real `pump` is `{pc0,pc1,pc2,pc3}` (pc0=p1,
+  pc1=p2, pc2=m2, pc3=m1) and `alarm` is `{state}`; `parseStatus` does `bool(payload.pump)` and `bool(payload.alarm)`,
+  which are null for objects, so pump, relays and alarm are always "ไม่ทราบสถานะ" on the live system. The old
+  fixtures were "derived from the code, not captured from a live broker".
+- **Not fixed, reported:** `pzem.p` is absent at the top level (power is in `phases[].p`), so กำลังไฟ shows "—";
+  `person_count` is absent in this format, so the detection card is unknown; `wirebreak` in the Pi payload is
+  hard-coded false in `to_dashboard_dict`.
+- **opencode:** `zai/glm-5.3-flashx` is refused ("subscription plan does not yet include access"); the same
+  family `zai/glm-5.3-flash` works and was used, in an isolated git worktree (a previous opencode run rewrote
+  unrelated files). `opencode/glm-5.3-flash-free` was not used (different provider, different data terms).
+- **Icons:** `src/app/favicon.ico` (16/32/48, replaces the default), `src/app/icon.png` (192), `src/app/apple-icon.png`
+  (180), `public/logo-mark.png` (header mark), `public/logo.png` (wordmark on login/register). Generated from the two
+  logos with ImageMagick; first attempt cropped the mark because I hard-coded a 900 px extent for a 1197 px trim
+  box: always derive the extent from the trimmed size. The mark uses indigo `#1f1478`, which the house style bans
+  (no violet/indigo); kept because it is the owner's brand asset.
+- **Delegation result (opencode `zai/glm-5.3-flash`, isolated worktree, reviewed line by line before applying):**
+  parseStatus now reads `mode`, `pump.pc0/pc1/pc2` and `alarm.state`; `modeView.ts` (+test); a `โหมด` row in
+  ControlPanel (viewer sees it too; no way to change the mode). Red first (9 failing), then 333/333. The `LIVE_B`
+  fixture was compared with the captured JSON: identical. Only allowed files changed. The patch was applied to the
+  main tree; the worktree and scratch branch were removed.
+- **Bug I introduced and fixed:** `proxy.ts` matcher only exempted `favicon.ico`, so `/icon.png`, `/apple-icon.png`,
+  `/logo-mark.png`, `/logo.png` answered 307 to /login for logged-out visitors (broken wordmark on the login page,
+  no apple-touch-icon). Added them to the matcher; verified logged-out 200 for the five assets, and 307/401 for
+  /dashboard, /admin, /api/water-level.
+- **Rig result (live-shaped payload through the local broker):** mode row "ควบคุมเอง" (MANUAL); ปั๊มหลัก/สัญญาณเตือน/
+  ปั๊ม IoT 1 "ปิดอยู่", ปั๊ม IoT 2 "ทำงาน" (pc2 true), ไฟ "ไม่ทราบสถานะ" (no source). After the feed stopped for
+  >30 s: "ไม่ทราบโหมด", devices unknown, title "ขาดการเชื่อมต่อ ... รายงานล่าสุด <time of last frame>".
+- **Bridge runbook (not done; needs Leo: sudo + a credential file, a Hard Stop):**
+  1. ship `mqtt_bridge.js` into the live release dir (next to `node_modules`, which has `mqtt` and `pg`):
+     `scp mqtt_bridge.js cmmc@<droplet>:~/wgw/releases/<REL>/` (add it to the rsync list of future releases).
+  2. `~/wgw/bridge.env`, mode 600, from `app.env` WITHOUT `PGOPTIONS` (with `search_path=wgw,public` the bridge's
+     `CREATE TABLE IF NOT EXISTS water_levels` would create `wgw.water_levels` and shadow the existing one):
+     PGUSER/PGHOST/PGDATABASE/PGPASSWORD/PGPORT, `MQTT_BROKER=<MQTT_URL>`, `MQTT_USER=<MQTT_USERNAME>`,
+     `MQTT_PASS=<MQTT_PASSWORD>`, `MQTT_TOPIC=stm32/status/all`, `STATUS_SAMPLE_SEC=300`.
+     Assumes the `nextjs` broker login may read `stm32/status/all` (the ACL file is not readable by cmmc: unverified).
+  3. unit `/etc/systemd/system/mqtt-bridge.service` (User=cmmc, WorkingDirectory=~/wgw/current,
+     EnvironmentFile=~/wgw/bridge.env, ExecStart=/usr/bin/node ~/wgw/current/mqtt_bridge.js, Restart=always),
+     then `systemctl daemon-reload && systemctl enable --now mqtt-bridge`.
+  4. verify: `journalctl -u mqtt-bridge` shows "Subscribed" and "[DB] Inserted row"; `select count(*), max(measured_at)
+     from water_levels` grows; the chart draws a line from the 2nd row on (one point draws nothing: no dots).
+  Note: the API returns the last 24 ROWS, so with 300 s sampling the chart covers 2 hours, not 24 hours; a real
+  24 h view needs a time-based query (not built).
+- **Lesson:** 📌 GENERAL: when a request names a model your plan does not include, probe the nearest model of the
+  same provider with a trivial prompt (no code) before choosing a substitute, and say so. 📌 GENERAL: `pgrep -f
+  <pattern>` inside a command that contains the pattern matches itself; wait on a PID or a log line instead.
+  📌 GENERAL: adding public static assets to an auth-gating proxy means adding them to its matcher.
+- **Deploy 0658fb5 (logo + parser/mode):** deps unchanged, node_modules hard-linked from 20261102-73cbd6c; this
+  release also ships `public/` (the logos). Clean build 333 tests / tsc / lint 0 errors / audit 0 high; smoke on :3100
+  passed. Leo ran the restart; the unit sat in `deactivating` for ~80 s (11:51:25 to 11:52:52 UTC) before the new
+  process came up from releases/20261102-0658fb5. Verified on www.hyxc.io: /login and /register 200, all five brand
+  images 200 without a session, /dashboard 307, /api/control 401, /_next/image 404, 0 error lines.
+  The slow stop is probably the default 90 s stop timeout waiting on long-lived SSE/camera connections (not
+  verified: the journal is not readable for cmmc); fix idea: `TimeoutStopSec=15` in the unit.
+  Not verified on prod: the mode row with a real session (needs Leo's account); the chart is still empty (no bridge).
+
+## [--:--] Graph still empty + 4 CI warnings (Leo: "GLM does all, I review, then CI/CD")
+- **Split:** opencode `zai/glm-5.3-flash` ran twice in parallel, in two isolated worktrees, with a file allow-list each; I
+  gave it the facts I had measured and did all production access myself (no external model drives a production host).
+  Both diffs were read line by line before applying; both stayed inside the allow-list.
+- **Warnings (A):** `@next/next/no-location-assign-relative-destination` x4 (useGateStatus, Go2RTCPlayer,
+  WaterLevelChart, ControlPanel). The rule only inspects static strings, so wrapping `location.assign` in a helper
+  would silence it without fixing anything; the rule's advice is `useRouter()`, which was done: `loginUrl()` (pure,
+  tested), `useRedirectToLogin()` (`router.replace`, so the expired page leaves no history entry). Lint: 0 problems.
+  Risk checked on purpose: the new hook sits in effect dependency arrays, so an unstable `useRouter()` would reconnect
+  the EventSource on every status. Measured in headless Chrome over 30 s with ~15 status messages: `EventSource`
+  constructed once, chart fetched once. 401 path (session deleted while the page was open, then a command pressed):
+  client-side navigation to `/login?next=%2Fdashboard`, same document, no reload.
+- **Graph (B), root cause as before (prod `water_levels` = 0 rows, nothing writes it), now fixed in the app:**
+  `src/lib/telemetry/recordLevel.ts` stores `radar.liquid` at most once per `WATER_LEVEL_SAMPLE_SEC` (default 300 s,
+  time taken from `receivedAt`, window claimed before the await, errors logged without payload, never thrown);
+  `broker.ts` calls it for every parsed status; `src/instrumentation.ts` starts the MQTT subscription at server boot
+  (`register()`, nodejs runtime) because the old lazy start only began on the first dashboard visitor, so nothing
+  would be recorded while nobody watches. Chosen over deploying `mqtt_bridge.js` because it needs no sudo, no extra
+  unit and no extra credential file; the bridge must NOT run against the same database at the same time.
+  The build does not call `register` (no MQTT lines in the build log).
+- **Rig proof of the root cause and the fix:** `water_levels` emptied (like prod), server started with
+  `WATER_LEVEL_SAMPLE_SEC=5`, no browser opened and no request made: 3 rows within ~12 s (2.236 m). Opening the
+  dashboard then draws the line. Gate: vitest 354/354, tsc, eslint 0 problems.
+- **Prod facts checked before deploying (read-only):** the Pi's six nodes hold six TCP connections to the droplet
+  broker, so telemetry reaches the app and the recorder will have data right after the restart.
+- **Observation, not acted on:** the droplet broker still listens on 0.0.0.0 for 1883, 8883 and 9001, and one
+  established connection came from a public Thai address (not identified: may be Leo's own device).
+  The 2026-10-31 notes called an anonymous public broker a P0; whether anonymous access is still allowed was NOT
+  tested (an outbound probe to the production broker needs Leo's go-ahead). The Pi publishes to the broker's public
+  IP (`MQTT_HOST` default) instead of the tailnet address.
+- **Chart semantics:** it shows the last 24 rows, so at 300 s sampling that is the last 2 hours (title says "24 ค่าล่าสุด").
+- **Lessons:** 📌 GENERAL: a lint rule that inspects static strings is satisfied by indirection; fix the behaviour
+  the rule protects, not the pattern it matches. 📌 GENERAL: when a hook's callback goes into an effect's dependency
+  array, test that it is stable by counting side effects (connections), not by reading the library docs.
+  📌 GENERAL: a background subscriber that starts on the first request records nothing while nobody is looking;
+  start it at process boot (Next `instrumentation.ts`).
+
+## [--:--] Deploy 63587a0 (lint warnings + server-side level recorder) and what prod showed afterwards
+- **Deploy:** clean worktree, 354 tests / tsc / lint 0 problems / audit 0 high; deps unchanged, node_modules
+  hard-linked from 20261102-0658fb5; smoke on :3100 with `MQTT_URL` unset (so the test instance could not write to the
+  production table); the boot log showed the telemetry line without any request, i.e. `register()` runs at start.
+  Prod `water_levels` was 0 rows before the switch. Leo restarted at ~12:19 UTC.
+- **Prod result:** the recorder wrote rows with nobody on the dashboard: ids 1-3 at 12:19:29, 12:19:37, 12:19:55, then
+  12:24:55 and 12:29:55 (exactly 05:00 apart, the designed interval). The 8 s and 18 s gaps are process starts:
+  `ActiveEnterTimestamp` moved from 12:19:27 to 12:19:51 (the service was restarted at least twice within ~30 s,
+  `NRestarts=0` so not a crash loop; cause: the restart command was run from two terminal tabs, tab 2 at 12:19:27 and
+  tab 3 at 12:19:51, whose session shows login 12:19:31 and the `active` output), and every start records its first sample at once. The one `/login` 502 seen
+  at that moment matches the second start. Not a recorder bug.
+- **Rows stop after 12:29:55:** the Pi went off the network. From 12:33 the service log shows only
+  `go2rtc unreachable` (the Pi's camera server), tailscale shows `water` offline, the droplet broker has 0 Pi
+  connections, and there is no `[telemetry] level insert failed` line in that period, so the DB path is healthy.
+  Exact moment the Pi stopped publishing: between 12:29:55 and 12:34:55 (no row at 12:34:55).
+- **Not verified on prod:** the chart in a signed-in browser (needs Leo's account); there are 5 rows, so it can draw.
+  Level values recorded: 1.155, 1.155, 1.49, 0.415, 0.42 m (earlier today the same sensor read 2.236 m; the bench
+  sensor moves, or `sensor_height` on the Pi differs from what the dashboard assumed: not investigated).
+- **Lesson:** 📌 GENERAL: when rows land at odd intervals, read the process start time before suspecting the
+  throttle; "first sample on start" plus a double restart looks exactly like a broken interval.
+  📌 GENERAL: before blaming your code for a data gap, check the data source (here: the Pi was powered off).

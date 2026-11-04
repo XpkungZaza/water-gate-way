@@ -1,23 +1,10 @@
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
-
-const pool = new Pool({
-  user: process.env.PGUSER,
-  host: process.env.PGHOST,
-  database: process.env.PGDATABASE,
-  password: process.env.PGPASSWORD,
-  port: Number(process.env.PGPORT) || 5432,
-});
-
-const mockData = Array.from({ length: 24 }).map((_, i) => ({
-  id: i + 1,
-  device_id: 'mock_device',
-  water_height: parseFloat((Math.random() * 2 + 10).toFixed(2)),
-  measured_at: new Date(Date.now() - (15 - i) * 3600000).toISOString(),
-}));
+import { db } from '@/lib/db';
+import { requireUser, authErrorResponse } from '@/lib/auth/dal';
 
 export async function GET() {
   try {
+    await requireUser();
     const query = `
       SELECT id, device_id, water_height, measured_at 
       FROM (
@@ -29,10 +16,13 @@ export async function GET() {
       ORDER BY measured_at ASC;
     `;
 
-    const { rows } = await pool.query(query);
+    const { rows } = await db.query(query);
     return NextResponse.json(rows);
   } catch (error) {
-    console.error('[API /water-level] DB error, returning mock fallback:', error);
-    return NextResponse.json(mockData);
+    const denied = authErrorResponse(error);
+    if (denied) return denied;
+    // WHY: 503 + generic body so the dashboard cannot mistake an outage for real data.
+    console.error('[API /water-level] DB error:', error);
+    return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
   }
 }

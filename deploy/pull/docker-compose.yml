@@ -1,0 +1,28 @@
+# One app container. pull-deploy.sh runs it twice with different project names and variables:
+#   project wgw-candidate: WGW_PORT=3100, TELEMETRY_RECORD=0 (smoke test, must not write DB rows)
+#   project wgw-web:       WGW_PORT=3000, TELEMETRY_RECORD=1 (live)
+# WHY the image is a variable: the deployer pins the exact digest it tested (image@sha256:...), not a moving tag.
+services:
+  app:
+    image: ${WGW_IMAGE:?set by pull-deploy.sh}
+    env_file: ${ENV_FILE:?set by pull-deploy.sh}
+    # WHY host networking: app.env reaches Postgres (docker-published on 127.0.0.1:5432) and Mosquitto (a host
+    # service) by loopback. On the bridge network 127.0.0.1 is the container itself, so both would fail while
+    # /login still returns 200. Host networking keeps app.env unchanged.
+    # The server MUST bind loopback only: in host mode there is no `ports:` mapping to limit exposure, and the
+    # image default HOSTNAME=0.0.0.0 would listen on the public interface.
+    network_mode: host
+    environment:
+      HOSTNAME: 127.0.0.1
+      PORT: ${WGW_PORT:-3000}
+      TELEMETRY_RECORD: ${TELEMETRY_RECORD:-1}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The droplet has ~450 MB RAM and no swap.
+    mem_limit: 256m

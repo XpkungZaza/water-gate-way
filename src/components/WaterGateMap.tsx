@@ -1,9 +1,11 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import Link from "next/link";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import type { Gate } from "@/lib/gates";
 
 /* ── fix default marker icon in bundled environments (Next.js/Webpack) ── */
 const iconRetinaUrl =
@@ -17,32 +19,31 @@ const shadowUrl =
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl });
 
-/* ── gate data ── */
-interface WaterGate {
-  name: string;
-  lat: number;
-  lng: number;
+/** Fit the map to every gate marker on load (one gate: centre on it at a readable zoom).
+ *  WHY: a fixed centre/zoom can show an empty map when the gates are elsewhere. */
+function FitToGates({ gates }: { gates: (Gate & { location?: string })[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (gates.length === 1) {
+      map.setView([gates[0].lat, gates[0].lng], 13);
+      return;
+    }
+    if (gates.length > 1) {
+      const bounds = L.latLngBounds(gates.map((g) => L.latLng(g.lat, g.lng)));
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }, [map, gates]);
+  return null;
 }
 
-const GATES: WaterGate[] = [
-  { name: "Gate 1 - Nam Ping", lat: 18.795, lng: 99.015 },
-  { name: "Gate 2 - Huay Kaew", lat: 18.81, lng: 98.948 },
-  { name: "Gate 3 - Mae Kuang", lat: 18.895, lng: 99.18 },
-  { name: "Gate 4 - Mae Rim", lat: 18.926, lng: 98.94 },
-  { name: "Gate 5 - Hang Dong", lat: 18.684, lng: 98.92 },
-];
-
-export default function WaterGateMap() {
-  const router = useRouter();
-
-  const handleMarkerClick = (gateName: string) => {
-    router.push(`/dashboard?location=${encodeURIComponent(gateName)}`);
-  };
-
+export default function WaterGateMap({ gates }: { gates: (Gate & { location?: string })[] }) {
   return (
     <MapContainer
+      className="wg-map"
       center={[18.7883, 98.9853]}
       zoom={11}
+      // WHY: with FitToGates moving the view during load, the tile fade-in left loaded tiles at opacity 0 (blank grey map).
+      fadeAnimation={false}
       scrollWheelZoom
       style={{ height: "100%", width: "100%" }}
     >
@@ -50,21 +51,18 @@ export default function WaterGateMap() {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {GATES.map((gate) => (
-        <Marker
-          key={gate.name}
-          position={[gate.lat, gate.lng]}
-          eventHandlers={{
-            click: () => handleMarkerClick(gate.name),
-          }}
-        >
+      <FitToGates gates={gates} />
+      {gates.map((gate) => (
+        <Marker key={gate.id} position={[gate.lat, gate.lng]}>
           <Popup>
-            <div className="text-sm font-semibold text-gray-800">
-              {gate.name}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              Click marker to open dashboard
-            </div>
+            <div className="text-sm font-bold text-fg">{gate.name}</div>
+            {gate.location && <div className="mt-0.5 text-xs text-muted">{gate.location}</div>}
+            <Link
+              href={`/dashboard?gate=${encodeURIComponent(gate.id)}`}
+              className="btn-primary mt-2 w-full"
+            >
+              เปิดแดชบอร์ด
+            </Link>
           </Popup>
         </Marker>
       ))}
